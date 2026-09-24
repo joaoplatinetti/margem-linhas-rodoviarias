@@ -17,6 +17,8 @@ uma seção do README.
 | 4 | Elasticidade e desenho de teste de preço | este repo | previsto |
 | 5 | Revenue management: reserva, no-show, overbooking | repo novo | previsto |
 | 6 | Dados abertos da ANTT | repo novo | previsto |
+| 7 | Motor reutilizável: o contrato de dados | este repo | ✅ publicado |
+| — | Avaliar uma malha real com o mesmo motor | fora deste repo | previsto |
 | — | App interativo | transversal | previsto |
 
 ---
@@ -123,6 +125,42 @@ escolha auditável; lá cada número é uma fonte com data de acesso.
 
 A ponte entre os dois já existe: [`docs/fontes-publicas.md`](docs/fontes-publicas.md)
 liga cada premissa deste modelo à fonte pública que a calibraria.
+
+## 7. Motor reutilizável: o contrato de dados ✅
+
+O modelo deixou de exigir a malha sintética. `margem/dados.py` declara o que o
+motor precisa saber sobre uma linha — chaves, aditivas, descritivas, com unidade
+e propósito — e `margem/motor.py` é o ponto de entrada único: qualquer fato que
+cumpra o contrato entra e sai classificado.
+
+**O achado veio do teste, não da leitura do código.** Uma malha estrangeira
+inventada atravessando o motor revelou dois acoplamentos que ninguém tinha
+notado: `janela_decisao` agrupava por colunas fixas do catálogo sintético, e
+`agregar` exigia os cinco componentes de custo do modelo. Os dois estouravam com
+qualquer malha que não fosse esta.
+
+**O refactor não moveu um número** — verificado na assinatura da janela, nos
+CSVs byte a byte e nas células da planilha.
+
+**Doc:** [`docs/contrato-de-dados.md`](docs/contrato-de-dados.md).
+
+## — Avaliar uma malha real com o mesmo motor
+
+**O que se constrói, e onde:** fora deste repositório. Um projeto que instala
+este pacote como biblioteca, monta o fato a partir do próprio sistema de venda,
+traduz pelo contrato e chama o motor.
+
+**As perguntas que só o dado real responde:**
+
+1. O degrau da dupla tripulação existe na operação, ou é artefato da premissa?
+2. Qual base de rateio o setor usa hoje, e quantas linhas mudariam de leitura em
+   outra?
+3. Quantas linhas estão a menos de um dígito de diesel da própria fronteira?
+4. A amplitude sazonal varia entre linhas como o sintético supõe?
+
+**A regra de fronteira**, escrita também em `docs/contrato-de-dados.md`: nenhum
+dado de operação real entra neste repositório. O que volta é método e achado
+direcional, nunca um valor.
 
 ## — App interativo
 

@@ -179,11 +179,21 @@ def precisa_regerar(fatores: dict[str, float]) -> bool:
 
 
 def rodar(fatores: dict[str, float] | None = None,
-          dataset: pd.DataFrame | None = None) -> pd.DataFrame:
-    """A janela de decisao sob um cenario. Devolve a janela ja classificada."""
+          dataset: pd.DataFrame | None = None,
+          gerador=None) -> pd.DataFrame:
+    """A janela de decisao sob um cenario. Devolve a janela ja classificada.
+
+    `gerador` e injetavel para o cenario poder rodar sobre outra malha que nao a
+    sintetica. O padrao continua sendo `sintetico.gerar`, e os sete parametros
+    de `PARAMETROS` so fazem sentido com ele — uma malha externa chega com o
+    custo ja calculado e nao tem preco de diesel para perturbar. Quem quiser
+    estressar malha propria perturba o proprio catalogo e passa o resultado como
+    `dataset`.
+    """
     fatores = fatores or {}
+    gerador = gerador or sintetico.gerar
     with cenario(**fatores):
-        bruto = sintetico.gerar() if (dataset is None or precisa_regerar(fatores)) else dataset
+        bruto = gerador() if (dataset is None or precisa_regerar(fatores)) else dataset
         fato = indicadores.calcular(custos.aplicar(bruto))
         return indicadores.janela_decisao(fato)
 

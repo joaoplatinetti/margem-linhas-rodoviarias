@@ -107,10 +107,22 @@ def agregar(fato: pd.DataFrame, por: list[str] | None = None) -> pd.DataFrame:
     `por=None` da o total da rede. Qualquer outro recorte (linha, mes, classe,
     corredor) passa pelo mesmo caminho.
     """
+    # Soma as aditivas que EXISTEM. A lista completa inclui os cinco componentes
+    # de custo da malha sintetica, e uma malha externa chega so com o
+    # `custo_variavel` consolidado — exigir os componentes amarraria o motor ao
+    # catalogo de premissas deste projeto.
+    presentes = [coluna for coluna in ADITIVAS if coluna in fato.columns]
+    faltando = set(("receita", "custo_variavel", "assentos_km")) - set(presentes)
+    if faltando:
+        raise ValueError(
+            f"nao da para agregar sem {', '.join(sorted(faltando))} — "
+            "ver margem.dados.CONTRATO"
+        )
+
     if por:
-        soma = fato.groupby(por, as_index=False)[ADITIVAS].sum()
+        soma = fato.groupby(por, as_index=False)[presentes].sum()
     else:
-        soma = fato[ADITIVAS].sum().to_frame().T
+        soma = fato[presentes].sum().to_frame().T
 
     return _razoes(soma)
 
@@ -133,10 +145,32 @@ def janela_decisao(fato: pd.DataFrame, meses: int | None = None) -> pd.DataFrame
         )
 
     recorte = fato[fato["ano_mes"].isin(ultimos)]
-    chaves = ["linha_id", "linha", "origem", "destino", "corredor", "classe",
-              "km", "assentos", "frequencia_semanal", "perfil", "tripulantes"]
+
+    # As chaves do agrupamento sao `linha_id` mais o que EXISTIR de descritivo.
+    # Lista fixa aqui amarrava a janela ao catalogo sintetico: uma malha externa
+    # sem `perfil` nem `frequencia_semanal` estourava com KeyError, e foi assim
+    # que o teste da ponte simulada descobriu o acoplamento.
+    #
+    # Estas colunas sao constantes DENTRO da linha, entao entram no `groupby`
+    # como carona e nao como recorte — agrupar por elas nao parte a linha em
+    # duas. Se alguma variar dentro da linha (uma mudanca de classe no meio do
+    # periodo), partiria, e por isso o teste seguinte confere a contagem.
+    descritivas = [
+        coluna for coluna in
+        ("linha", "origem", "destino", "corredor", "classe", "km", "assentos",
+         "frequencia_semanal", "perfil", "tripulantes")
+        if coluna in recorte.columns
+    ]
+    chaves = ["linha_id", *descritivas]
 
     janela = agregar(recorte, por=chaves)
+    if janela["linha_id"].duplicated().any():
+        repetidas = janela.loc[janela["linha_id"].duplicated(), "linha_id"].unique()
+        raise ValueError(
+            f"a janela partiu {len(repetidas)} linha(s) em mais de um registro: "
+            f"{list(repetidas)[:3]}. Alguma coluna descritiva ({', '.join(descritivas)}) "
+            "muda ao longo do periodo — tire ela do fato antes de avaliar."
+        )
     janela.attrs["meses"] = ultimos
     return classificar(janela)
 

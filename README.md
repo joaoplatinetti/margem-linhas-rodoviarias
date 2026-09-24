@@ -466,6 +466,54 @@ título, eixos e marcações continuam editáveis.
 
 ---
 
+## O modelo aceita qualquer malha
+
+Até aqui o modelo só consumia o próprio gerador, e por isso nunca precisou
+declarar o que espera. `margem/dados.py` declara — e `margem/motor.py` é o ponto
+de entrada único:
+
+```python
+from margem import dados, motor
+
+fato = dados.preparar(minha_malha, mapa={"id_linha": "linha_id", ...})
+janela = motor.avaliar(fato, fixo_mensal=180_000.0, base_rateio="km")
+```
+
+| Grupo | Colunas | Papel |
+|---|---|---|
+| **Chaves** | `linha_id`, `ano_mes` | definem o grão: um registro por linha e mês |
+| **Aditivas** | `partidas`, `km_rodados`, `assentos_km`, `passageiros`, `passageiros_km`, `receita`, `custo_variavel` | as únicas que se somam; todo indicador é razão entre duas |
+| **Descritivas** | `linha`, `km`, `assentos`, `classe`, `corredor` | opcionais; rotulam a saída e permitem recortes |
+
+O contrato existe para uma falha específica: **coluna ausente que vira zero no
+meio de uma divisão produz indicador plausível e errado**. Um CASK sem
+tripulação é só um CASK menor, e nada na tela avisa.
+
+O motor **não calcula custo variável** — isso depende de premissa de operação, e
+premissa é de quem opera. Ele rateia o fixo, que é a parte que depende de uma
+convenção, e por isso a convenção é parâmetro.
+
+Escrever o contrato pagou na hora: uma malha estrangeira inventada atravessando
+o motor revelou **dois acoplamentos** que ninguém tinha notado — `janela_decisao`
+agrupava por colunas fixas do catálogo sintético e `agregar` exigia os cinco
+componentes de custo deste modelo. Os dois estouravam com qualquer malha que não
+fosse esta.
+
+E o refactor **não moveu um número**: a assinatura da janela, os seis CSVs e as
+células da planilha continuam idênticos.
+
+> **Nenhum dado de operação real entra neste repositório** — nem como exemplo,
+> nem agregado, nem em teste. Avaliar uma malha real acontece fora, num projeto
+> que instala este pacote como biblioteca; o que volta é método e achado
+> direcional, nunca um valor. Ver
+> [`docs/contrato-de-dados.md`](docs/contrato-de-dados.md).
+
+```bash
+uv run margem contrato   # o contrato impresso
+```
+
+---
+
 ## Como rodar
 
 ```bash
@@ -482,8 +530,9 @@ uv run margem rateio        # o efeito da base de rateio
 uv run margem corte L15     # o efeito de cortar uma linha
 uv run margem estresse      # ruptura, sensibilidade e probabilidade
 uv run margem elasticidade  # por que o histórico não mede elasticidade
+uv run margem contrato      # o que o motor precisa saber sobre uma linha
 uv run margem conferir      # as identidades do modelo e o fecho do rateio
-uv run pytest               # 114 testes
+uv run pytest               # 130 testes
 ```
 
 Nenhum subcomando depende de estado deixado pelo anterior e não há pasta de
@@ -500,6 +549,8 @@ arquivo que pode ficar velho em relação às premissas.
 
 ```
 margem/
+  dados.py         o contrato de entrada: o que o motor precisa saber
+  motor.py         o ponto de entrada único: do fato à decisão
   config.py        todas as premissas: seed, período, custos, limiares
   linhas.py        o catálogo das 20 linhas
   sintetico.py     o gerador: sazonalidade, tendência, ruído, teto de oferta
@@ -514,7 +565,7 @@ margem/
   pipeline.py      a CLI
 powerbi/medidas.dax
 saida/             versionada de propósito: Excel, CSVs e imagens sem rodar nada
-testes/            114 testes
+testes/            130 testes
 ```
 
 ## Limites declarados

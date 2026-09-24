@@ -79,7 +79,8 @@ def aplicar_variaveis(fato: pd.DataFrame) -> pd.DataFrame:
 # Bloco fixo
 # ---------------------------------------------------------------------------
 
-def ratear_fixo(fato: pd.DataFrame, base: str | None = None) -> pd.DataFrame:
+def ratear_fixo(fato: pd.DataFrame, base: str | None = None,
+                total_mensal: float | None = None) -> pd.DataFrame:
     """Rateia o bloco fixo mensal entre as linhas, pela base pedida.
 
     A conta e sempre a mesma:
@@ -97,6 +98,10 @@ def ratear_fixo(fato: pd.DataFrame, base: str | None = None) -> pd.DataFrame:
 
     Nenhuma decisao de manter ou cortar deve sair so do rateio — dai a margem de
     contribuicao, que nao depende de base nenhuma, aparecer sempre ao lado.
+
+    `total_mensal` deixa o bloco fixo vir de fora. E o que permite avaliar uma
+    malha que nao e a sintetica sem tocar em `config`: a estrutura de uma
+    empresa de verdade nao tem por que caber na premissa declarada aqui.
     """
     base = base or config.BASE_RATEIO_FIXO
     if base not in config.BASES_RATEIO:
@@ -113,7 +118,8 @@ def ratear_fixo(fato: pd.DataFrame, base: str | None = None) -> pd.DataFrame:
         )
 
     df = fato.copy()
-    total_mensal = config.fixo_mensal_total()
+    total_mensal = (config.fixo_mensal_total() if total_mensal is None
+                    else float(total_mensal))
 
     do_mes = df.groupby("ano_mes")[dirigente].transform("sum")
     df["base_rateio"] = base
@@ -124,9 +130,16 @@ def ratear_fixo(fato: pd.DataFrame, base: str | None = None) -> pd.DataFrame:
     return df
 
 
-def aplicar(fato: pd.DataFrame, base: str | None = None) -> pd.DataFrame:
-    """O modelo de custo completo: variaveis e fixo rateado."""
-    return ratear_fixo(aplicar_variaveis(fato), base=base)
+def aplicar(fato: pd.DataFrame, base: str | None = None,
+            total_mensal: float | None = None) -> pd.DataFrame:
+    """O modelo de custo completo: variaveis e fixo rateado.
+
+    So serve para a malha SINTETICA: `aplicar_variaveis` depende do catalogo de
+    premissas de `config` e das colunas do catalogo de linhas. Uma malha externa
+    ja chega com o proprio `custo_variavel` calculado e entra pelo
+    `motor.avaliar`.
+    """
+    return ratear_fixo(aplicar_variaveis(fato), base=base, total_mensal=total_mensal)
 
 
 # ---------------------------------------------------------------------------

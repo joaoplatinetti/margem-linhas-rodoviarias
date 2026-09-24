@@ -60,7 +60,8 @@ log = logging.getLogger(__name__)
 # Parte 1: a base de rateio
 # ---------------------------------------------------------------------------
 
-def janela_por_base(fato_bruto: pd.DataFrame, base: str) -> pd.DataFrame:
+def janela_por_base(fato_bruto: pd.DataFrame, base: str,
+                    total_mensal: float | None = None) -> pd.DataFrame:
     """A janela de decisao recalculada sob uma base de rateio.
 
     Recebe o fato ANTES do custo (so oferta, demanda e receita) porque o rateio
@@ -68,7 +69,8 @@ def janela_por_base(fato_bruto: pd.DataFrame, base: str) -> pd.DataFrame:
     trocar a coluna do fixo daria um custo total inconsistente com o proprio
     rateio.
     """
-    fato = indicadores.calcular(custos.aplicar(fato_bruto, base=base))
+    fato = indicadores.calcular(
+        custos.aplicar(fato_bruto, base=base, total_mensal=total_mensal))
     janela = indicadores.janela_decisao(fato)
     janela["base_rateio"] = base
     return janela

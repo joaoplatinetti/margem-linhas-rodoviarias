@@ -18,6 +18,7 @@ se o dado viesse de uma extracao cara — aqui ele nao vem.
     margem corte LINHA   o que acontece com a malha ao cortar uma linha
     margem estresse      ponto de ruptura, sensibilidade e probabilidade
     margem elasticidade  por que o historico nao mede elasticidade
+    margem contrato      o que o motor precisa saber sobre uma linha
     margem conferir      as identidades do modelo (RASK = yield x LF etc.)
 """
 from __future__ import annotations
@@ -73,10 +74,14 @@ def _montar() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
     Devolve (fato mensal com indicadores, janela de decisao, catalogo).
     """
-    from margem import custos, indicadores, linhas, sintetico
+    from margem import custos, linhas, motor, sintetico
 
-    fato = indicadores.calcular(custos.aplicar(sintetico.gerar()))
-    janela = indicadores.recomendacao(indicadores.janela_decisao(fato))
+    # O custo VARIAVEL e da malha sintetica (depende das premissas de config); o
+    # motor cuida do fixo, dos indicadores e da decisao. E a mesma separacao que
+    # uma malha externa usaria: ela traz o proprio custo variavel e entra aqui.
+    fato_bruto = custos.aplicar_variaveis(sintetico.gerar())
+    fato = motor.mensal(fato_bruto)
+    janela = motor.avaliar(fato_bruto)
     return fato, janela, linhas.catalogo()
 
 
@@ -472,6 +477,37 @@ def cmd_elasticidade(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_contrato(args: argparse.Namespace) -> int:
+    """O contrato de entrada, para ligar uma malha propria sem ler codigo."""
+    from margem import dados
+
+    contrato = dados.descrever()
+    print()
+    print("O QUE O MOTOR PRECISA SABER SOBRE UMA LINHA")
+    print()
+    for grupo, titulo in [
+        ("chave", "CHAVES — definem o grao: um registro por linha x mes"),
+        ("aditiva", "ADITIVAS — as unicas que se somam; todo indicador e razao entre duas"),
+        ("descritiva", "DESCRITIVAS — opcionais; rotulam a saida e permitem recortes"),
+    ]:
+        print(f"  {titulo}")
+        for registro in contrato[contrato["grupo"] == grupo].itertuples(index=False):
+            print(f"    {registro.coluna:<16} {registro.unidade:<16} {registro.serve_para}")
+        print()
+
+    print("  O motor NAO calcula custo variavel: ele depende de premissa de")
+    print("  operacao, que e de quem opera. A malha sintetica calcula o dela; uma")
+    print("  malha externa chega com o dela pronto.")
+    print()
+    print("  Vocabulario diferente? margem.dados.preparar(fato, mapa={...})")
+    print("  traduz e deriva o que der (ASK de assentos x km x partidas).")
+    print()
+    print("  Este repositorio nunca recebe dado de operacao real — a avaliacao de")
+    print("  uma malha real acontece fora dele. Ver docs/contrato-de-dados.md.")
+    print()
+    return 0
+
+
 def cmd_conferir(args: argparse.Namespace) -> int:
     """As identidades do modelo, medidas no fato e na janela.
 
@@ -534,6 +570,7 @@ def main(argv: list[str] | None = None) -> int:
         ("estresse", cmd_estresse, "ruptura, sensibilidade e probabilidade"),
         ("elasticidade", cmd_elasticidade,
          "por que o historico nao mede elasticidade"),
+        ("contrato", cmd_contrato, "o que o motor precisa saber sobre uma linha"),
         ("conferir", cmd_conferir, "as identidades do modelo"),
     ]:
         sub = subcomandos.add_parser(nome, help=ajuda)
