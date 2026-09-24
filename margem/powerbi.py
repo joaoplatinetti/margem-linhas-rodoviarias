@@ -144,7 +144,7 @@ def fato_custo_componente(fato: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(["linha_id", "data", "componente"], ignore_index=True)
 
 
-def fato_classificacao(janela: pd.DataFrame) -> pd.DataFrame:
+def fato_classificacao(janela: pd.DataFrame, estresse: dict | None = None) -> pd.DataFrame:
     """A janela de 12 meses fechada, uma linha por linha de onibus.
 
     Aqui as razoes vem prontas de proposito (ver a docstring do modulo): e um
@@ -170,6 +170,23 @@ def fato_classificacao(janela: pd.DataFrame) -> pd.DataFrame:
     saida = df[colunas].copy()
     saida["no_limite"] = saida["no_limite"].map({True: "sim", False: "nao"})
 
+    if estresse is not None:
+        # A incerteza entra no MESMO retrato, e nao numa tabela nova: e um valor
+        # por linha, da mesma janela fechada, e uma tabela so para tres colunas
+        # exigiria mais um relacionamento sem nada em troca.
+        probabilidades = estresse["incerteza"]["por_linha"].set_index("linha_id")
+        for classe in config.CLASSIFICACOES:
+            saida[f"prob_{classe.lower()}"] = (
+                saida["linha_id"].map(probabilidades[classe]).round(4)
+            )
+        saida["confianca_no_rotulo"] = (
+            saida["linha_id"].map(probabilidades["p_rotulo_base"]).round(4)
+        )
+        ruptura = estresse["ruptura"].set_index("linha_id")
+        saida["diesel_de_ruptura"] = (
+            saida["linha_id"].map(ruptura["valor_ruptura"]).round(2)
+        )
+
     quatro_casas = ["margem_contribuicao_pct", "load_factor", "lf_equilibrio",
                     "folga_lf", "yield_pax_km", "rask", "cask_variavel",
                     "cask_total", "spread_rask_cask"]
@@ -182,7 +199,8 @@ def fato_classificacao(janela: pd.DataFrame) -> pd.DataFrame:
     return saida
 
 
-def exportar(fato: pd.DataFrame, janela: pd.DataFrame) -> dict[str, int]:
+def exportar(fato: pd.DataFrame, janela: pd.DataFrame,
+             estresse: dict | None = None) -> dict[str, int]:
     """Grava as seis tabelas em saida/powerbi/. Devolve nome -> numero de linhas."""
     config.SAIDA_POWERBI.mkdir(parents=True, exist_ok=True)
 
@@ -192,7 +210,7 @@ def exportar(fato: pd.DataFrame, janela: pd.DataFrame) -> dict[str, int]:
         "dim_componente_custo": dim_componente_custo(fato),
         "fato_linha_mes": fato_linha_mes(fato),
         "fato_custo_componente": fato_custo_componente(fato),
-        "fato_classificacao": fato_classificacao(janela),
+        "fato_classificacao": fato_classificacao(janela, estresse),
     }
 
     for nome, df in tabelas.items():

@@ -13,7 +13,7 @@ uma seção do README.
 |---|---|---|---|
 | 1 | O modelo base: margem, RASK/CASK, decisão | este repo | ✅ publicado |
 | 2 | Rateio e corte de malha | este repo | ✅ publicado |
-| 3 | Estresse de premissas e incerteza | este repo | previsto |
+| 3 | Estresse de premissas e incerteza | este repo | ✅ publicado |
 | 4 | Elasticidade e desenho de teste de preço | este repo | previsto |
 | 5 | Revenue management: reserva, no-show, overbooking | repo novo | previsto |
 | 6 | Dados abertos da ANTT | repo novo | previsto |
@@ -52,20 +52,27 @@ simulação de tirar uma linha da malha.
 
 **Figuras:** `rateio-por-base`, `ganho-do-corte`.
 
-## 3. Estresse de premissas e incerteza
+## 3. Estresse de premissas e incerteza ✅
 
-**O que se constrói:** o preço de diesel (e de pedágio, e de salário) em que
-cada linha deixa de cobrir o próprio custo; gráfico tornado de qual premissa
-move mais o resultado da rede; e Monte Carlo sobre a incerteza das premissas,
-devolvendo a **probabilidade** de cada linha ser MANTER em vez de um rótulo seco.
+Ponto de ruptura por linha, tornado de sensibilidade e Monte Carlo sobre as sete
+premissas.
 
-**O achado esperado:** a classificação de várias linhas não sobrevive a uma alta
-de um dígito no diesel — e duas delas já estão hoje a menos de um centavo por
-assento-km da fronteira. Uma decisão apresentada como binária é, na verdade, uma
-distribuição.
+**Os achados:**
 
-**Por que é barato:** `margem/config.py` já tem toda premissa declarada em um
-lugar só, e o pipeline é determinístico. A infraestrutura existe.
+- **Campo Grande–Cuiabá quebra com o diesel a R$ 6,25** — 1,6% acima da
+  premissa. Uma decisão que o relatório apresenta como estável.
+- **A receita move seis vezes mais que o custo.** 10% de tarifa valem 59% do
+  resultado; 10% de pedágio valem 1%. Refinar a premissa de pedágio é trabalho
+  perdido, e a conversa que importa é sobre preço — não sobre mais um corte.
+- **Dez das vinte linhas têm rótulo que não se sustenta em 90% dos cenários.**
+  Campo Grande–Cuiabá é MANTER em 55% deles. A rede fecha no vermelho em 6%.
+
+**Figuras:** `ponto-de-ruptura`, `tornado-premissas`,
+`probabilidade-classificacao`.
+
+**O que ficou declarado como falso de propósito:** a linha da tarifa no tornado
+supõe demanda que não reage a preço. É exatamente a premissa que o item 4
+ataca.
 
 ## 4. Elasticidade e desenho de teste de preço
 
@@ -73,6 +80,10 @@ lugar só, e o pipeline é determinístico. A infraestrutura existe.
 recuperá-la de dado observacional com a variação de preço que existe na vida
 real, e mostrar a estimativa falhando. Depois, dimensionar o teste — tamanho de
 amostra por passo de preço e por classe — que identificaria de verdade.
+
+**Por que agora:** o tornado do item 3 mostrou que a tarifa é a premissa mais
+poderosa do modelo — e mediu isso supondo demanda que não reage a preço. A
+próxima pergunta é obrigatória.
 
 **O achado esperado:** histórico observacional de tarifa não mede elasticidade,
 porque a variação de preço que existe nele é mix de seção e de classe, não

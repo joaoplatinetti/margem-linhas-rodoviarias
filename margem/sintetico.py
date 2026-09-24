@@ -103,6 +103,7 @@ def gerar() -> pd.DataFrame:
         sazonal = _sazonalidade_por_linha(indice, linha.amplitude_sazonal)
         ocupacao = (
             linha.ocupacao_base
+            * config.FATOR_DEMANDA          # 1,0 no modelo base; ver config
             * sazonal
             * bloco["fator_tendencia"].to_numpy()
             * ruido(config.RUIDO_DEMANDA, n_meses)

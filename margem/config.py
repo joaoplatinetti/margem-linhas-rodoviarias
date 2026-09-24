@@ -251,6 +251,46 @@ COMPONENTES_TODOS: list[str] = COMPONENTES_VARIAVEIS + COMPONENTES_FIXOS
 
 CLASSIFICACOES = ("MANTER", "AJUSTAR", "REVER")
 
+# ---------------------------------------------------------------------------
+# Fatores de cenario
+# ---------------------------------------------------------------------------
+
+# Multiplicadores globais de demanda e de tarifa. Valem 1,0 no modelo base e
+# existem para `margem/estresse.py` deslocar os dois sem reescrever o catalogo
+# de linhas — a mesma razao pela qual o preco do diesel e uma constante e nao um
+# numero dentro da funcao de custo.
+#
+# A demanda esbarra no teto de ocupacao: subir o fator nao enche onibus que ja
+# esta em 96%. Isso e proposital e e informacao — a alavanca "vender mais" tem
+# limite fisico, e o estresse mostra onde ele morde.
+FATOR_DEMANDA = 1.0
+FATOR_TARIFA = 1.0
+
+# Incerteza declarada de cada premissa, como desvio-padrao de um fator
+# multiplicativo lognormal. Sao JUIZOS, nao medicoes — e e por isso que estao
+# aqui, visiveis, e nao dentro do sorteio.
+INCERTEZA: dict[str, float] = {
+    "diesel": 0.12,              # o mais volatil: acompanha cambio e politica de preco
+    "pneus_e_manutencao": 0.08,
+    "tripulacao": 0.06,          # dissidio anual, razoavelmente previsivel
+    "pedagio": 0.07,
+    "custo_fixo": 0.10,
+    "tarifa": 0.05,              # ha teto tarifario, entao a banda e estreita
+    "demanda": 0.08,
+}
+
+# Correlacao entre os fatores de CUSTO no sorteio de Monte Carlo. Sortear os
+# sete de forma independente subestimaria a cauda: diesel, pedagio, manutencao e
+# salario sobem juntos quando a inflacao sobe, e o cenario ruim de verdade e o
+# que junta todos. O sorteio decompoe cada fator num choque comum e num proprio.
+# Tarifa e demanda ficam FORA do choque comum — repasse de custo para tarifa
+# existe, mas depende de revisao tarifaria e nao acontece no mesmo mes.
+CORRELACAO_CUSTOS = 0.35
+
+# ---------------------------------------------------------------------------
+# Classificacao
+# ---------------------------------------------------------------------------
+
 # Faixa de folga, em R$ por ASSENTO-KM, para marcar uma linha como "no limite".
 # Um centavo por assento-km: nessa faixa, a linha cobre o custo cheio, mas uma
 # alta de diesel de 10% ja a derruba para AJUSTAR. Tratar essa linha como igual

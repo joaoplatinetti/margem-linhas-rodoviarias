@@ -266,11 +266,74 @@ uv run margem corte L15     # o que acontece ao cortar uma linha
 
 ---
 
+## Quanto a decisão aguenta
+
+Até aqui o modelo entrega um rótulo por linha. Um rótulo esconde duas coisas que
+quem decide precisa saber: **a que distância da fronteira a linha está** e **qual
+premissa a empurra para lá**.
+
+### A que preço de diesel cada linha quebra
+
+![Ponto de ruptura](saida/imagens/ponto-de-ruptura.png)
+
+Campo Grande–Cuiabá cobre o custo cheio hoje e **deixa de cobrir com o diesel a
+R$ 6,25** — 1,6% acima do preço da premissa. Campo Grande–São Paulo aguenta até
+R$ 6,64. São duas decisões que o relatório apresenta como estáveis e não são.
+
+Lido ao contrário, o mesmo número serve para as linhas em AJUSTAR: Brasília–BH
+passaria a cobrir com o diesel a R$ 5,42. É a informação mais acionável que
+existe sobre uma linha que não fecha a conta.
+
+Manaus–Boa Vista não aparece no gráfico, e a ausência é deliberada: o
+cruzamento dela cai fora da faixa varrida. Isso **não** é "não cobre nem com
+diesel de graça" — é que o valor não foi medido, e extrapolar daria um número
+inventado com cara de apurado.
+
+### Qual premissa move o resultado
+
+![Tornado de premissas](saida/imagens/tornado-premissas.png)
+
+Dez por cento de tarifa movem o resultado da rede em **59%**; dez por cento de
+diesel, em 21%; de pedágio, em 1%. É alavancagem operacional: a margem é ~15% da
+receita, então toda variação de receita chega ao resultado multiplicada por
+seis.
+
+A leitura prática é desconfortável: **refinar a premissa de pedágio é trabalho
+perdido**, e a conversa que importa é sobre preço e ocupação, não sobre mais uma
+rodada de corte de custo.
+
+Com uma ressalva que a própria figura declara: a linha da tarifa supõe demanda
+que **não reage a preço**. É uma premissa falsa, mantida de propósito — medir a
+reação é o assunto da [próxima ramificação](ROADMAP.md).
+
+### A decisão como probabilidade
+
+![Probabilidade da classificação](saida/imagens/probabilidade-classificacao.png)
+
+Sorteando as sete premissas juntas, dentro da incerteza declarada em
+`config.INCERTEZA`, **dez das vinte linhas têm rótulo que não se sustenta em 90%
+dos cenários**. Campo Grande–Cuiabá é MANTER em apenas 55% deles.
+
+Os fatores de custo compartilham um choque comum (correlação 0,35): diesel,
+pedágio e salário sobem juntos quando a inflação sobe, e sorteá-los de forma
+independente esconderia justamente a cauda que interessa. Mesmo assim, o
+resultado da rede fica negativo em **6% dos cenários**.
+
+"MANTER em 55% dos cenários" é uma frase que se defende numa reunião. "MANTER",
+sozinho, não é.
+
+```bash
+uv run margem estresse                  # ruptura, tornado e Monte Carlo
+uv run margem estresse --cenarios 1000  # mais sorteios
+```
+
+---
+
 ## As saídas
 
 ### `saida/margem-linhas-rodoviarias.xlsx`
 
-Seis abas, formatadas célula a célula com **openpyxl** (e não `to_excel`, porque
+Sete abas, formatadas célula a célula com **openpyxl** (e não `to_excel`, porque
 o destinatário é alguém que vai abrir o arquivo e decidir, não um script):
 
 | Aba | O que tem |
@@ -279,6 +342,7 @@ o destinatário é alguém que vai abrir o arquivo e decidir, não um script):
 | **Linhas** | a janela de 12 meses por linha, com semáforo, ocupação de equilíbrio, escala de cor no MC% e barra no load factor |
 | **Mensal** | o fato linha × mês completo, 480 registros |
 | **Custos** | as premissas com a base de cada componente e o custo unitário por linha |
+| **Estresse** | sensibilidade, preço de ruptura por linha e a decisão como probabilidade |
 | **Dicionário** | a fórmula, a unidade e a leitura de cada indicador |
 | **Metodologia** | como o dataset foi gerado, dentro do próprio arquivo — planilha circula desacompanhada |
 
@@ -316,9 +380,10 @@ cabeçalho do arquivo traz a ordem de importação e a lista de relacionamentos.
 
 ### `saida/imagens/` — as figuras
 
-Cinco figuras em **PNG (200 dpi)** para publicar e **SVG** para reeditar:
+Oito figuras em **PNG (200 dpi)** para publicar e **SVG** para reeditar:
 `matriz-decisao`, `load-factor-equilibrio`, `esquema-estrela`,
-`rateio-por-base` e `ganho-do-corte`.
+`rateio-por-base`, `ganho-do-corte`, `ponto-de-ruptura`, `tornado-premissas` e
+`probabilidade-classificacao`.
 
 A paleta das classes é **azul / amarelo / vermelho, não verde / amarelo /
 vermelho**. O semáforo óbvio falha em daltonismo: medido em OKLab, o par
@@ -349,8 +414,9 @@ uv run margem powerbi       # só os CSVs
 uv run margem imagens       # só as figuras (PNG + SVG)
 uv run margem rateio        # o efeito da base de rateio
 uv run margem corte L15     # o efeito de cortar uma linha
+uv run margem estresse      # ruptura, sensibilidade e probabilidade
 uv run margem conferir      # as identidades do modelo e o fecho do rateio
-uv run pytest               # 73 testes
+uv run pytest               # 95 testes
 ```
 
 Nenhum subcomando depende de estado deixado pelo anterior e não há pasta de
@@ -375,11 +441,12 @@ margem/
   excel.py         a pasta de trabalho formatada
   powerbi.py       o esquema estrela
   malha.py         bases de rateio e simulação de corte
-  graficos.py      as cinco figuras
+  estresse.py      cenários, ponto de ruptura, tornado e Monte Carlo
+  graficos.py      as oito figuras
   pipeline.py      a CLI
 powerbi/medidas.dax
 saida/             versionada de propósito: Excel, CSVs e imagens sem rodar nada
-testes/            73 testes
+testes/            95 testes
 ```
 
 ## Limites declarados

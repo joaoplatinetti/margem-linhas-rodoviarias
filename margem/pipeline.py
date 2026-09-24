@@ -16,6 +16,7 @@ se o dado viesse de uma extracao cara — aqui ele nao vem.
     margem imagens       so as figuras do artigo (PNG + SVG)
     margem rateio        o efeito da base de rateio do custo fixo
     margem corte LINHA   o que acontece com a malha ao cortar uma linha
+    margem estresse      ponto de ruptura, sensibilidade e probabilidade
     margem conferir      as identidades do modelo (RASK = yield x LF etc.)
 """
 from __future__ import annotations
@@ -139,21 +140,18 @@ def _resumo_terminal(fato: pd.DataFrame, janela: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_tudo(args: argparse.Namespace) -> int:
-    from margem import excel, graficos, malha, powerbi
+    from margem import excel, graficos, powerbi
 
     fato, janela, catalogo = _montar()
     _resumo_terminal(fato, janela)
 
-    caminho = excel.exportar(fato, janela, catalogo)
-    tabelas = powerbi.exportar(fato, janela)
+    analises = _analises(janela)
+    estresse = {chave: analises[chave]
+                for chave in _CHAVES_ESTRESSE}
 
-    bruto = _fato_sem_fixo()
-    figuras = graficos.exportar(
-        janela,
-        comparacao=malha.comparar_bases(bruto),
-        ranking=malha.ranking_de_corte(janela),
-        cascata=malha.simular_corte(bruto, _pior_linha(janela)),
-    )
+    caminho = excel.exportar(fato, janela, catalogo, estresse=estresse)
+    tabelas = powerbi.exportar(fato, janela, estresse=estresse)
+    figuras = graficos.exportar(janela, **analises)
 
     print(f"Excel     {caminho}")
     print(f"Power BI  {config.SAIDA_POWERBI}  "
@@ -199,8 +197,10 @@ def cmd_excel(args: argparse.Namespace) -> int:
     from margem import excel
 
     fato, janela, catalogo = _montar()
+    # A aba Estresse entra aqui tambem, e nao so em `tudo`: planilha gerada por
+    # um subcomando nao pode sair com menos abas que a gerada pelo outro.
     print()
-    print(excel.exportar(fato, janela, catalogo))
+    print(excel.exportar(fato, janela, catalogo, estresse=_estresse(janela)))
     print()
     return 0
 
@@ -209,12 +209,44 @@ def cmd_powerbi(args: argparse.Namespace) -> int:
     from margem import powerbi
 
     fato, janela, _ = _montar()
-    tabelas = powerbi.exportar(fato, janela)
+    tabelas = powerbi.exportar(fato, janela, estresse=_estresse(janela))
     print()
     for nome, linhas_gravadas in tabelas.items():
         print(f"  {nome:<24} {linhas_gravadas:>5} linhas")
     print(f"\n{config.SAIDA_POWERBI}\n")
     return 0
+
+
+# As analises de estresse, que Excel e Power BI consomem em conjunto.
+_CHAVES_ESTRESSE = ("sensibilidade", "ruptura", "incerteza")
+
+
+def _estresse(janela: pd.DataFrame) -> dict:
+    """So as analises de estresse, para quem nao precisa das figuras."""
+    from margem import estresse
+
+    return {
+        "sensibilidade": estresse.tornado(),
+        "ruptura": estresse.ruptura("diesel"),
+        "incerteza": estresse.monte_carlo(n=400),
+    }
+
+
+def _analises(janela: pd.DataFrame) -> dict:
+    """As analises que alimentam as figuras alem das tres do modelo base.
+
+    Reunidas numa funcao so porque `tudo` e `imagens` precisam exatamente das
+    mesmas — e a duplicacao entre os dois ja tinha comecado a divergir.
+    """
+    from margem import malha
+
+    bruto = _fato_sem_fixo()
+    return {
+        "comparacao": malha.comparar_bases(bruto),
+        "ranking": malha.ranking_de_corte(janela),
+        "cascata": malha.simular_corte(bruto, _pior_linha(janela)),
+        **_estresse(janela),
+    }
 
 
 def _pior_linha(janela: pd.DataFrame) -> str:
@@ -231,16 +263,10 @@ def _pior_linha(janela: pd.DataFrame) -> str:
 
 
 def cmd_imagens(args: argparse.Namespace) -> int:
-    from margem import graficos, malha
+    from margem import graficos
 
     _, janela, _ = _montar()
-    bruto = _fato_sem_fixo()
-    figuras = graficos.exportar(
-        janela,
-        comparacao=malha.comparar_bases(bruto),
-        ranking=malha.ranking_de_corte(janela),
-        cascata=malha.simular_corte(bruto, _pior_linha(janela)),
-    )
+    figuras = graficos.exportar(janela, **_analises(janela))
     print()
     for nome, caminhos in figuras.items():
         print(f"  {nome:<26} {'  '.join(p.rsplit('.', 1)[-1] for p in caminhos)}")
@@ -328,6 +354,57 @@ def cmd_corte(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_estresse(args: argparse.Namespace) -> int:
+    """Quanto a decisao aguenta: ruptura, tornado e Monte Carlo."""
+    from margem import estresse
+
+    print()
+    print("SENSIBILIDADE — uma premissa de cada vez, 10% para cada lado")
+    sensibilidade = estresse.tornado()
+    for registro in sensibilidade.itertuples(index=False):
+        print(f"  {registro.rotulo:<28} {_pct(registro.variacao_baixa):>8} / "
+              f"{_pct(registro.variacao_alta):>8}   "
+              f"MANTER {registro.manter_baixa} / {registro.manter_alta}")
+    print(f"\n  resultado base: {_moeda(sensibilidade.attrs['resultado_base'])}"
+          f"   |   {sensibilidade.attrs['manter_base']} linhas em MANTER")
+    print("  A alavancagem operacional explica o topo: a margem e ~15% da")
+    print("  receita, entao 10% de receita a mais vira 60% de resultado.")
+    print()
+
+    print("PONTO DE RUPTURA — a que preco de diesel cada linha deixa de cobrir")
+    ruptura = estresse.ruptura("diesel")
+    base = float(ruptura["valor_base"].iloc[0])
+    print(f"  diesel de hoje: R$ {_dec(base, 2)}/l")
+    for registro in ruptura.itertuples(index=False):
+        if registro.situacao != "medido":
+            print(f"  {registro.linha:<38}  {registro.situacao}")
+            continue
+        seta = "aguenta ate" if registro.fator_ruptura > 1 else "so cobriria com"
+        print(f"  {registro.linha:<38}  {seta:<15} "
+              f"R$ {_dec(registro.valor_ruptura, 2)}/l   "
+              f"({_pct(registro.folga)})")
+    print()
+
+    print(f"INCERTEZA — {args.cenarios} cenarios com as sete premissas juntas")
+    incerteza = estresse.monte_carlo(n=args.cenarios)
+    por_linha = incerteza["por_linha"]
+    for registro in por_linha.itertuples(index=False):
+        marca = "  <-- rotulo nao se sustenta" if registro.incerta else ""
+        probabilidade = getattr(registro, registro.classificacao_base)
+        print(f"  {registro.linha:<38} {registro.classificacao_base:<8} "
+              f"em {_pct(probabilidade):>6} dos cenarios{marca}")
+
+    resumo = incerteza["resumo_resultado"]
+    print()
+    print(f"  resultado da rede: p05 {_moeda(resumo['p05'])}  |  "
+          f"mediana {_moeda(resumo['p50'])}  |  p95 {_moeda(resumo['p95'])}")
+    print(f"  probabilidade de a rede dar PREJUIZO: {_pct(resumo['prob_prejuizo'])}")
+    print(f"  {int(por_linha['incerta'].sum())} das {len(por_linha)} linhas tem "
+          "rotulo que nao se sustenta em 90% dos cenarios.")
+    print()
+    return 0
+
+
 def cmd_conferir(args: argparse.Namespace) -> int:
     """As identidades do modelo, medidas no fato e na janela.
 
@@ -387,12 +464,16 @@ def main(argv: list[str] | None = None) -> int:
         ("imagens", cmd_imagens, "so as figuras do artigo (PNG + SVG)"),
         ("rateio", cmd_rateio, "o efeito da base de rateio do custo fixo"),
         ("corte", cmd_corte, "o efeito de cortar uma linha da malha"),
+        ("estresse", cmd_estresse, "ruptura, sensibilidade e probabilidade"),
         ("conferir", cmd_conferir, "as identidades do modelo"),
     ]:
         sub = subcomandos.add_parser(nome, help=ajuda)
         sub.set_defaults(funcao=funcao)
         if nome == "corte":
             sub.add_argument("linha", help="id da linha a cortar, por exemplo L16")
+        if nome == "estresse":
+            sub.add_argument("--cenarios", type=int, default=400,
+                             help="sorteios do Monte Carlo (padrao: 400)")
 
     args = analisador.parse_args(argv)
     _log(args.verboso)

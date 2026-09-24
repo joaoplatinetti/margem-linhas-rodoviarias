@@ -87,6 +87,16 @@ FORMATOS: dict[str, str] = {
     "folga_lf": PERCENTUAL,
     "ocupacao_base": PERCENTUAL,
     "participacao": PERCENTUAL,
+    "MANTER": PERCENTUAL,
+    "AJUSTAR": PERCENTUAL,
+    "REVER": PERCENTUAL,
+    "p_rotulo_base": PERCENTUAL,
+    "folga": PERCENTUAL,
+    "variacao_baixa": PERCENTUAL,
+    "variacao_alta": PERCENTUAL,
+    "valor_ruptura": MOEDA,
+    "fator_ruptura": DECIMAL,
+    "elasticidade": DECIMAL,
     "yield_pax_km": UNITARIO,
     "rask": UNITARIO,
     "cask_variavel": UNITARIO,
@@ -187,6 +197,18 @@ ROTULOS: dict[str, str] = {
     "tripulacao_km": "Tripulacao R$/km",
     "tarifa_km_referencia": "Tarifa ref. R$/pax-km",
     "faixa_distancia": "Faixa de distancia",
+    "premissa": "Premissa",
+    "classificacao_base": "Decisao do relatorio",
+    "p_rotulo_base": "Confianca no rotulo",
+    "incerta": "Rotulo fragil",
+    "fator_ruptura": "Fator de ruptura",
+    "valor_ruptura": "Diesel de ruptura",
+    "situacao": "Situacao",
+    "variacao_baixa": "Premissa -10%",
+    "variacao_alta": "Premissa +10%",
+    "elasticidade": "Elasticidade",
+    "manter_baixa": "MANTER a -10%",
+    "manter_alta": "MANTER a +10%",
     "dupla_tripulacao": "Dupla tripulacao",
 }
 
@@ -533,6 +555,75 @@ def _aba_custos(wb: Workbook, fato: pd.DataFrame, catalogo: pd.DataFrame) -> Non
     _impressao(ws)
 
 
+def _aba_estresse(wb: Workbook, estresse: dict) -> None:
+    """O que a decisao aguenta, dentro da propria planilha.
+
+    Existe pelo mesmo motivo das abas Metodologia e Dicionario: planilha circula
+    desacompanhada, e a informacao de que dez das vinte linhas tem rotulo
+    fragil nao pode viver so num grafico solto num post.
+    """
+    ws = wb.create_sheet("Estresse")
+
+    linha = _titulo(
+        ws, "Quanto a decisao aguenta",
+        "Sensibilidade a cada premissa, preco de diesel de ruptura por linha, e "
+        "a classificacao como probabilidade.",
+    )
+
+    ws.cell(row=linha, column=1, value="Sensibilidade do resultado da rede").font = FONTE_SUBTITULO
+    linha += 1
+    # `rotulo` e o nome da premissa aqui, mas o dicionario de rotulos ja usa
+    # essa chave para "Componente" na aba de custos. Renomear na origem evita a
+    # coluna sair com o cabecalho da outra tabela.
+    sensibilidade = estresse["sensibilidade"][
+        ["rotulo", "variacao_baixa", "variacao_alta", "manter_baixa",
+         "manter_alta", "elasticidade"]
+    ].rename(columns={"rotulo": "premissa"})
+    linha = _tabela(ws, sensibilidade, linha_inicial=linha, congelar=False, filtro=False)
+
+    ws.cell(row=linha, column=1,
+            value="Preco do diesel em que cada linha deixa de cobrir").font = FONTE_SUBTITULO
+    ws.cell(row=linha, column=5,
+            value="Fator abaixo de 1: o diesel teria que CAIR para a linha cobrir.").font = Font(
+        italic=True, size=9, color="595959")
+    linha += 1
+    ruptura = estresse["ruptura"][
+        ["linha", "classe", "classificacao", "fator_ruptura", "valor_ruptura",
+         "folga", "situacao"]
+    ]
+    linha = _tabela(ws, ruptura, linha_inicial=linha, congelar=False, filtro=False)
+
+    ws.cell(row=linha, column=1,
+            value="A decisao como probabilidade").font = FONTE_SUBTITULO
+    ws.cell(row=linha, column=5,
+            value=f"{estresse['incerteza']['n']} cenarios com as sete premissas "
+                  "sorteadas juntas.").font = Font(italic=True, size=9, color="595959")
+    linha += 1
+    probabilidades = estresse["incerteza"]["por_linha"][
+        ["linha", "classe", "classificacao_base", *config.CLASSIFICACOES,
+         "p_rotulo_base", "incerta"]
+    ]
+    proxima = _tabela(ws, probabilidades, linha_inicial=linha, congelar=False, filtro=False)
+    _escala_de_cor(ws, "p_rotulo_base", list(probabilidades.columns),
+                   linha + 1, linha + len(probabilidades))
+
+    resumo = estresse["incerteza"]["resumo_resultado"]
+    ws.cell(row=proxima, column=1, value="Resultado da rede nos cenarios").font = FONTE_SUBTITULO
+    proxima += 1
+    for rotulo, chave, formato in [
+        ("Percentil 5", "p05", MOEDA_MILHAR),
+        ("Mediana", "p50", MOEDA_MILHAR),
+        ("Percentil 95", "p95", MOEDA_MILHAR),
+        ("Probabilidade de prejuizo", "prob_prejuizo", PERCENTUAL),
+    ]:
+        ws.cell(row=proxima, column=1, value=rotulo).font = Font(bold=True, size=10)
+        celula = ws.cell(row=proxima, column=2, value=float(resumo[chave]))
+        celula.number_format = formato
+        proxima += 1
+
+    _impressao(ws)
+
+
 def _aba_dicionario(wb: Workbook) -> None:
     ws = wb.create_sheet("Dicionario")
     dicionario = pd.DataFrame(
@@ -724,7 +815,8 @@ def _propriedades(wb: Workbook, fato: pd.DataFrame) -> None:
     wb.properties.modified = ultimo
 
 
-def exportar(fato: pd.DataFrame, janela: pd.DataFrame, catalogo: pd.DataFrame) -> str:
+def exportar(fato: pd.DataFrame, janela: pd.DataFrame, catalogo: pd.DataFrame,
+             estresse: dict | None = None) -> str:
     """Monta e grava a pasta de trabalho. Devolve o caminho."""
     wb = Workbook()
     _propriedades(wb, fato)
@@ -732,6 +824,8 @@ def exportar(fato: pd.DataFrame, janela: pd.DataFrame, catalogo: pd.DataFrame) -
     _aba_linhas(wb, janela)
     _aba_mensal(wb, fato)
     _aba_custos(wb, fato, catalogo)
+    if estresse is not None:
+        _aba_estresse(wb, estresse)
     _aba_dicionario(wb)
     _aba_metodologia(wb, fato)
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 
 import matplotlib
+import numpy as np
 import pandas as pd
 
 matplotlib.use("Agg")   # sem display: e geracao de arquivo, nao janela
@@ -92,12 +93,22 @@ def _estilo() -> None:
         "axes.labelsize": 10,
         "legend.frameon": False,
         "svg.fonttype": "none",   # texto editavel no SVG, nao curva
+        # Sem isto, um texto com DOIS cifroes vira mathtext e o matplotlib
+        # renderiza o miolo como formula: "R$ 2,15 a R$ 18,45/l" saiu como
+        # "R2, 15aR 18,45/l". Com um cifrao so o bug nao aparece, entao ele se
+        # esconde ate a primeira frase que cite dois valores em reais.
+        "text.parse_math": False,
         # Sem sal de hash, o matplotlib gera os ids de clip com uuid4 e o SVG
         # sai diferente a cada execucao mesmo com os dados identicos. Como a
         # saida e versionada, isso faria `margem tudo` sujar o `git status`
         # todo dia sem um unico numero ter mudado.
         "svg.hashsalt": "margem-linhas-rodoviarias",
     })
+
+
+def _dec(valor: float, casas: int = 2) -> str:
+    """Decimal com virgula. So o separador decimal, sem milhar."""
+    return f"{float(valor):.{casas}f}".replace(".", ",")
 
 
 def _pct(valor: float, casas: int = 1) -> str:
@@ -697,11 +708,239 @@ def ganho_do_corte(ranking: pd.DataFrame, cascata: dict | None = None) -> list[s
     _rodape(fig, rodape)
     return _gravar(fig, "ganho-do-corte")
 
+
+# ---------------------------------------------------------------------------
+# 6. Tornado: qual premissa move mais o resultado
+# ---------------------------------------------------------------------------
+
+def tornado(sensibilidade: pd.DataFrame) -> list[str]:
+    """Barras bilaterais: o resultado da rede com cada premissa 10% acima e abaixo.
+
+    Serve para decidir onde gastar esforco de apuracao. Refinar uma premissa que
+    move 1,4% do resultado e trabalho perdido; a que move 59% merece a planilha
+    que ninguem quer montar.
+
+    A cor separa DIRECAO (premissa abaixo / acima), nao "bom" e "ruim": +10% de
+    diesel e ruim e +10% de tarifa e bom, e pintar as duas de vermelho por serem
+    altas diria uma coisa falsa.
+    """
+    _estilo()
+    ordenado = sensibilidade.sort_values("amplitude_resultado", ignore_index=True)
+    fig, ax = plt.subplots(figsize=(10.5, 6.4))
+
+    posicoes = list(range(len(ordenado)))
+    altura = 0.34
+    ax.barh([p + altura / 2 for p in posicoes], ordenado["variacao_baixa"],
+            height=altura, color=AZUL, zorder=3, label="premissa 10% ABAIXO")
+    ax.barh([p - altura / 2 for p in posicoes], ordenado["variacao_alta"],
+            height=altura, color=LARANJA, zorder=3, label="premissa 10% ACIMA")
+    ax.axvline(0, color=EIXO, linewidth=1.0, zorder=4)
+
+    for posicao, registro in zip(posicoes, ordenado.itertuples(index=False)):
+        for valor, deslocamento in ((registro.variacao_baixa, altura / 2),
+                                    (registro.variacao_alta, -altura / 2)):
+            alinhamento = "left" if valor >= 0 else "right"
+            recuo = 0.012 if valor >= 0 else -0.012
+            ax.text(valor + recuo, posicao + deslocamento, _pct(abs(valor), 0),
+                    fontsize=8, color=TINTA_2, va="center", ha=alinhamento, zorder=5)
+
+    ax.set_yticks(posicoes, ordenado["rotulo"], fontsize=9.5)
+    ax.tick_params(axis="y", length=0)
+    ax.set_xlabel("Variacao do resultado da rede")
+    ax.xaxis.set_major_formatter(lambda v, _: _pct(v, 0))
+    ax.grid(axis="x", color=GRADE, linewidth=0.7)
+    ax.set_axisbelow(True)
+    largura = max(ordenado[["variacao_baixa", "variacao_alta"]].abs().max()) * 1.28
+    ax.set_xlim(-largura, largura)
+    ax.set_ylim(-0.7, len(ordenado) - 0.3)
+    for lado in ("top", "right", "left"):
+        ax.spines[lado].set_visible(False)
+    ax.legend(loc="lower right", fontsize=8.8, labelcolor=TINTA_2, handletextpad=0.6)
+
+    amplitude = sensibilidade.attrs.get("amplitude", 0.10)
+    ax.set_title("Qual premissa move o resultado", fontsize=15, fontweight="bold",
+                 color=TINTA, loc="left", pad=22)
+    ax.text(0, 1.02,
+            f"Uma premissa de cada vez, {_pct(amplitude, 0)} para cada lado. "
+            "Resultado base da janela: "
+            f"R$ {sensibilidade.attrs['resultado_base']:,.0f}".replace(",", "."),
+            transform=ax.transAxes, fontsize=9.5, color=TINTA_2, va="bottom")
+
+    _rodape(fig, "A alavancagem operacional e o que explica o topo da lista: a "
+                 "margem e ~15% da receita, entao 10% de receita a mais vira "
+                 "60% de resultado.\n"
+                 "ATENCAO: a linha da tarifa supoe demanda que NAO reage a preco. "
+                 "E uma premissa falsa, mantida aqui de proposito — medir a "
+                 "reacao e o assunto da proxima ramificacao do roadmap.")
+    return _gravar(fig, "tornado-premissas")
+
+
+# ---------------------------------------------------------------------------
+# 7. Ponto de ruptura
+# ---------------------------------------------------------------------------
+
+def ponto_de_ruptura(ruptura: pd.DataFrame) -> list[str]:
+    """A que preco de diesel cada linha cruza o proprio ponto de equilibrio.
+
+    Barra divergente ancorada no preco de HOJE, e nao no zero: o que interessa
+    nao e o valor absoluto do ponto de ruptura, e a distancia ate ele. Barra
+    para a direita e folga; para a esquerda e o quanto o diesel precisaria CAIR
+    para a linha passar a cobrir.
+    """
+    _estilo()
+    medidas = ruptura[ruptura["situacao"] == "medido"].sort_values(
+        "valor_ruptura", ascending=True, ignore_index=True)
+    fora = ruptura[ruptura["situacao"] != "medido"]
+
+    fig, ax = plt.subplots(figsize=(10.5, 7.8))
+    base = float(ruptura["valor_base"].iloc[0])
+
+    posicoes = list(range(len(medidas)))
+    for posicao, registro in zip(posicoes, medidas.itertuples(index=False)):
+        cor = COR_CLASSE[registro.classificacao]
+        ax.barh(posicao, registro.valor_ruptura - base, left=base,
+                height=0.62, color=cor, zorder=3)
+        folga = registro.valor_ruptura - base
+        alinhamento = "left" if folga >= 0 else "right"
+        recuo = 0.12 if folga >= 0 else -0.12
+        ax.text(registro.valor_ruptura + recuo, posicao,
+                f"R$ {registro.valor_ruptura:.2f}".replace(".", ","),
+                fontsize=8.3, color=TINTA_2, va="center", ha=alinhamento, zorder=5)
+
+    ax.axvline(base, color=TINTA, linewidth=1.4, zorder=4)
+    ax.text(base, len(medidas) - 0.25,
+            f"  diesel hoje: R$ {base:.2f}".replace(".", ","),
+            fontsize=9, color=TINTA, fontweight="bold", va="bottom", ha="left")
+
+    ax.set_yticks(posicoes, medidas["linha"], fontsize=8.6)
+    ax.tick_params(axis="y", length=0)
+    for etiqueta, registro in zip(ax.get_yticklabels(), medidas.itertuples(index=False)):
+        etiqueta.set_color(TINTA if registro.valor_ruptura < base else TINTA_2)
+
+    ax.set_xlabel("Preco do diesel em que a linha deixa de cobrir o custo cheio (R$/l)")
+    ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0f}".replace(".", ","))
+    ax.grid(axis="x", color=GRADE, linewidth=0.7)
+    ax.set_axisbelow(True)
+    ax.set_xlim(1.8, float(medidas["valor_ruptura"].max()) * 1.14)
+    ax.set_ylim(-0.8, len(medidas) + 0.4)
+    for lado in ("top", "right", "left"):
+        ax.spines[lado].set_visible(False)
+
+    legenda = [
+        Line2D([0], [0], marker="s", color="none", markerfacecolor=COR_CLASSE[nome],
+               markeredgecolor="none", markersize=11, label=f"hoje classificada como {nome}")
+        for nome in config.CLASSIFICACOES
+    ]
+    ax.legend(handles=legenda, loc="lower right", fontsize=8.8,
+              labelcolor=TINTA_2, handletextpad=0.5)
+
+    ax.set_title("A que preco de diesel cada linha quebra", fontsize=15,
+                 fontweight="bold", color=TINTA, loc="left", pad=22)
+    ax.text(0, 1.012,
+            "Barra para a direita e folga. Para a esquerda, e o quanto o diesel "
+            "precisaria CAIR para a linha passar a cobrir o custo cheio.",
+            transform=ax.transAxes, fontsize=9.5, color=TINTA_2, va="bottom")
+
+    rodape = ("Duas linhas cobrem o custo cheio hoje e param de cobrir com alta "
+              "de um digito no diesel — decisao que o relatorio apresenta como "
+              "estavel e nao e.")
+    if len(fora):
+        faixa = ruptura.attrs.get("faixa_valor")
+        nomes = ", ".join(fora["linha"])
+        # Formatar so os numeros: `.replace(".", ",")` na frase inteira troca o
+        # ponto final por virgula, que foi o que aconteceu na primeira versao.
+        piso = f"{faixa[0]:.2f}".replace(".", ",")
+        teto = f"{faixa[1]:.2f}".replace(".", ",")
+        rodape += (f"\n{nomes}: o cruzamento fica FORA da faixa varrida "
+                   f"(R$ {piso} a R$ {teto}/l). Nao e 'nao cobre nem com diesel "
+                   "de graca' — e que o valor nao foi medido, e extrapolar daria "
+                   "um numero inventado.")
+    _rodape(fig, rodape)
+    return _gravar(fig, "ponto-de-ruptura")
+
+
+# ---------------------------------------------------------------------------
+# 8. A classificacao como probabilidade
+# ---------------------------------------------------------------------------
+
+def probabilidade_classificacao(por_linha: pd.DataFrame, n: int) -> list[str]:
+    """Barra empilhada: em quantos cenarios cada linha cai em cada decisao.
+
+    Parte-do-todo com tres classes ordenadas, entao barra empilhada horizontal —
+    e horizontal porque os nomes das linhas sao longos.
+
+    O que a figura desfaz: o relatorio entrega um rotulo, e um rotulo afirma uma
+    certeza que as premissas nao sustentam. "MANTER em 55% dos cenarios" e uma
+    frase que se pode defender numa reuniao; "MANTER" sozinho, nao.
+    """
+    _estilo()
+    ordenado = por_linha.sort_values("MANTER", ascending=True, ignore_index=True)
+    fig, ax = plt.subplots(figsize=(10.5, 8.0))
+
+    posicoes = list(range(len(ordenado)))
+    esquerda = np.zeros(len(ordenado))
+    for nome in config.CLASSIFICACOES:
+        ax.barh(posicoes, ordenado[nome], left=esquerda, height=0.64,
+                color=COR_CLASSE[nome], zorder=3, label=nome)
+        esquerda = esquerda + ordenado[nome].to_numpy()
+
+    # Referencia do que se considera rotulo confiavel. Rotular so as linhas que
+    # nao a alcancam: numero em todas as barras viraria ruido.
+    ax.axvline(0.90, color=TINTA, linewidth=1.2, linestyle=(0, (3, 2)), zorder=5)
+    ax.text(0.90, len(ordenado) - 0.2, "  90%: rotulo confiavel",
+            fontsize=8.6, color=TINTA, va="bottom", ha="left")
+
+    for posicao, registro in zip(posicoes, ordenado.itertuples(index=False)):
+        if not registro.incerta:
+            continue
+        probabilidade = getattr(registro, registro.classificacao_base)
+        texto = ax.text(1.015, posicao,
+                        f"{registro.classificacao_base} em {_pct(probabilidade, 0)}",
+                        fontsize=8.2, color=TINTA, va="center", ha="left", zorder=6)
+        texto.set_path_effects([efeitos.withStroke(linewidth=2.4, foreground=SUPERFICIE)])
+
+    ax.set_yticks(posicoes, ordenado["linha"], fontsize=8.6)
+    ax.tick_params(axis="y", length=0)
+    for etiqueta, registro in zip(ax.get_yticklabels(), ordenado.itertuples(index=False)):
+        etiqueta.set_color(TINTA if registro.incerta else TINTA_2)
+
+    ax.set_xlim(0, 1.32)
+    ax.set_ylim(-0.7, len(ordenado) + 0.1)
+    ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.xaxis.set_major_formatter(lambda v, _: _pct(v, 0))
+    ax.set_xlabel("Parcela dos cenarios sorteados")
+    ax.grid(axis="x", color=GRADE, linewidth=0.7)
+    ax.set_axisbelow(True)
+    for lado in ("top", "right", "left"):
+        ax.spines[lado].set_visible(False)
+    ax.legend(loc="lower right", fontsize=8.8, labelcolor=TINTA_2,
+              handletextpad=0.5, ncols=3, bbox_to_anchor=(1.0, -0.115))
+
+    incertas = int(ordenado["incerta"].sum())
+    ax.set_title("A decisao nao e um rotulo, e uma distribuicao", fontsize=15,
+                 fontweight="bold", color=TINTA, loc="left", pad=22)
+    ax.text(0, 1.012,
+            f"{n} cenarios com as sete premissas sorteadas juntas, dentro da "
+            "incerteza declarada em config.INCERTEZA.",
+            transform=ax.transAxes, fontsize=9.5, color=TINTA_2, va="bottom")
+
+    _rodape(fig, f"{incertas} das {len(ordenado)} linhas tem rotulo que nao se "
+                 "sustenta em 90% dos cenarios — e o relatorio as apresenta com a "
+                 "mesma confianca das outras.\n"
+                 "Os fatores de custo sao sorteados com choque comum "
+                 f"(correlacao {_dec(config.CORRELACAO_CUSTOS, 2)}): diesel, pedagio e "
+                 "salario sobem juntos, e sortear independente esconderia a cauda.",
+            y=-0.10)
+    return _gravar(fig, "probabilidade-classificacao")
+
 # ---------------------------------------------------------------------------
 
 def exportar(janela: pd.DataFrame, comparacao: pd.DataFrame | None = None,
              ranking: pd.DataFrame | None = None,
-             cascata: dict | None = None) -> dict[str, list[str]]:
+             cascata: dict | None = None,
+             sensibilidade: pd.DataFrame | None = None,
+             ruptura: pd.DataFrame | None = None,
+             incerteza: dict | None = None) -> dict[str, list[str]]:
     """As figuras. Devolve nome -> caminhos gravados.
 
     As duas da ramificacao 1 sao opcionais para `margem imagens` continuar
@@ -717,4 +956,11 @@ def exportar(janela: pd.DataFrame, comparacao: pd.DataFrame | None = None,
         figuras["rateio-por-base"] = rateio_por_base(comparacao)
     if ranking is not None:
         figuras["ganho-do-corte"] = ganho_do_corte(ranking, cascata)
+    if sensibilidade is not None:
+        figuras["tornado-premissas"] = tornado(sensibilidade)
+    if ruptura is not None:
+        figuras["ponto-de-ruptura"] = ponto_de_ruptura(ruptura)
+    if incerteza is not None:
+        figuras["probabilidade-classificacao"] = probabilidade_classificacao(
+            incerteza["por_linha"], incerteza["n"])
     return figuras

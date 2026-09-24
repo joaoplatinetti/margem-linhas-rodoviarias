@@ -110,4 +110,4 @@ def tarifa_km_referencia(df: pd.DataFrame) -> pd.Series:
     """
     base = df["classe"].map(config.TARIFA_KM_POR_CLASSE)
     decaimento = (config.TARIFA_KM_ANCORA / df["km"]) ** config.TARIFA_DECAIMENTO_DISTANCIA
-    return base * decaimento * df["fator_tarifa"]
+    return base * decaimento * df["fator_tarifa"] * config.FATOR_TARIFA
