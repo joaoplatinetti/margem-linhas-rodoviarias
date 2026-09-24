@@ -10,6 +10,9 @@ dependencies = [
     # A planilha e formatada celula por celula (numero, cor, painel congelado,
     # escala de cor), entao openpyxl entra direto e nao via pandas.to_excel.
     "openpyxl>=3.1",
+    # As tres figuras do artigo (matriz de decisao, esquema estrela, LF de
+    # equilibrio) saem em PNG para publicar e SVG para reeditar.
+    "matplotlib>=3.9",
 ]
 
 [project.scripts]

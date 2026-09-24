@@ -74,6 +74,25 @@ def _razoes(df: pd.DataFrame) -> pd.DataFrame:
     # e e o numero que decide a classificacao.
     saida["spread_rask_cask"] = saida["rask"] - saida["cask_total"]
 
+    # --- Load factor de equilibrio --------------------------------------
+    # A ocupacao que a linha precisaria ter, ao yield que ela ja pratica, para
+    # a receita empatar com o custo. Sai direto da identidade RASK = yield x LF:
+    #
+    #     yield x LF = CASK   =>   LF de equilibrio = CASK / yield
+    #
+    # A conta vale porque neste modelo NENHUM componente de custo depende do
+    # numero de passageiros — todos tem base km ou base partida. Se existisse
+    # comissao por passageiro, o custo subiria junto com a ocupacao e o
+    # equilibrio seria ponto fixo, nao divisao. Vale conferir esta premissa
+    # antes de acrescentar componente novo ao catalogo.
+    #
+    # E a mesma informacao do spread, em unidade que a operacao entende: "faltam
+    # 8 pontos de ocupacao" e acionavel de um jeito que "spread de -R$ 0,015 por
+    # assento-km" nao e.
+    saida["lf_equilibrio"] = dividir(saida["cask_total"], saida["yield_pax_km"])
+    saida["lf_equilibrio_variavel"] = dividir(saida["cask_variavel"], saida["yield_pax_km"])
+    saida["folga_lf"] = saida["load_factor"] - saida["lf_equilibrio"]
+
     return saida
 
 
@@ -233,6 +252,9 @@ def reconciliar(df: pd.DataFrame) -> pd.DataFrame:
         "CASK total = CASK var + fixo/ASK": (
             df["cask_total"]
             - (df["cask_variavel"] + df["custo_fixo_rateado"] / df["assentos_km"])
+        ),
+        "yield x LF de equilibrio = CASK": (
+            df["yield_pax_km"] * df["lf_equilibrio"] - df["cask_total"]
         ),
     }
     return pd.DataFrame(

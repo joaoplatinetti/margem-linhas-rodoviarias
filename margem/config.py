@@ -26,6 +26,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 SAIDA = RAIZ / "saida"
 SAIDA_POWERBI = SAIDA / "powerbi"
+SAIDA_IMAGENS = SAIDA / "imagens"
 EXCEL = SAIDA / "margem-linhas-rodoviarias.xlsx"
 
 # ---------------------------------------------------------------------------

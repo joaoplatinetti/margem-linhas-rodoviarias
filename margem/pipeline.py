@@ -8,11 +8,12 @@ e mais barato e mais seguro do que guardar um Parquet que pode ficar velho em
 relacao as premissas de `config.py`. Guardar estado intermediario faria sentido
 se o dado viesse de uma extracao cara — aqui ele nao vem.
 
-    margem tudo          gera, calcula e exporta Excel + CSVs
+    margem tudo          gera, calcula e exporta Excel + CSVs + imagens
     margem linhas        o catalogo e o custo unitario por linha
     margem indicadores   a tabela de decisao (janela de 12 meses)
     margem excel         so a planilha
     margem powerbi       so os CSVs do Power BI
+    margem imagens       so as figuras do artigo (PNG + SVG)
     margem conferir      as identidades do modelo (RASK = yield x LF etc.)
 """
 from __future__ import annotations
@@ -119,17 +120,20 @@ def _resumo_terminal(fato: pd.DataFrame, janela: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_tudo(args: argparse.Namespace) -> int:
-    from margem import excel, powerbi
+    from margem import excel, graficos, powerbi
 
     fato, janela, catalogo = _montar()
     _resumo_terminal(fato, janela)
 
     caminho = excel.exportar(fato, janela, catalogo)
     tabelas = powerbi.exportar(fato, janela)
+    figuras = graficos.exportar(janela)
 
     print(f"Excel     {caminho}")
     print(f"Power BI  {config.SAIDA_POWERBI}  "
           f"({len(tabelas)} tabelas, {sum(tabelas.values())} linhas)")
+    print(f"Imagens   {config.SAIDA_IMAGENS}  "
+          f"({len(figuras)} figuras, PNG + SVG)")
     print()
     return 0
 
@@ -187,6 +191,18 @@ def cmd_powerbi(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_imagens(args: argparse.Namespace) -> int:
+    from margem import graficos
+
+    _, janela, _ = _montar()
+    figuras = graficos.exportar(janela)
+    print()
+    for nome, caminhos in figuras.items():
+        print(f"  {nome:<26} {'  '.join(p.rsplit('.', 1)[-1] for p in caminhos)}")
+    print(f"\n{config.SAIDA_IMAGENS}\n")
+    return 0
+
+
 def cmd_conferir(args: argparse.Namespace) -> int:
     """As identidades do modelo, medidas no fato e na janela.
 
@@ -234,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         ("indicadores", cmd_indicadores, "a tabela de decisao por linha"),
         ("excel", cmd_excel, "so a planilha formatada"),
         ("powerbi", cmd_powerbi, "so os CSVs do Power BI"),
+        ("imagens", cmd_imagens, "so as figuras do artigo (PNG + SVG)"),
         ("conferir", cmd_conferir, "as identidades do modelo"),
     ]:
         sub = subcomandos.add_parser(nome, help=ajuda)

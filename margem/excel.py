@@ -82,6 +82,9 @@ FORMATOS: dict[str, str] = {
     "margem_contribuicao_pct": PERCENTUAL,
     "resultado_pct": PERCENTUAL,
     "load_factor": PERCENTUAL,
+    "lf_equilibrio": PERCENTUAL,
+    "lf_equilibrio_variavel": PERCENTUAL,
+    "folga_lf": PERCENTUAL,
     "ocupacao_base": PERCENTUAL,
     "participacao": PERCENTUAL,
     "yield_pax_km": UNITARIO,
@@ -154,6 +157,9 @@ ROTULOS: dict[str, str] = {
     "resultado": "Resultado",
     "resultado_pct": "Resultado %",
     "load_factor": "Load factor",
+    "lf_equilibrio": "LF de equilibrio",
+    "lf_equilibrio_variavel": "LF equil. (variavel)",
+    "folga_lf": "Folga de ocupacao",
     "yield_pax_km": "Yield (R$/pax-km)",
     "rask": "RASK",
     "cask_variavel": "CASK variavel",
@@ -415,8 +421,9 @@ def _aba_resumo(wb: Workbook, fato: pd.DataFrame, janela: pd.DataFrame) -> None:
     ws.cell(row=linha, column=1, value="As linhas em risco").font = FONTE_SUBTITULO
     linha += 1
     risco = janela[janela["classificacao"] != "MANTER"].sort_values("spread_rask_cask")
-    colunas_risco = ["linha_id", "linha", "km", "classe", "load_factor", "yield_pax_km",
-                     "rask", "cask_total", "spread_rask_cask", "margem_contribuicao_pct",
+    colunas_risco = ["linha_id", "linha", "km", "classe", "load_factor",
+                     "lf_equilibrio", "folga_lf", "yield_pax_km", "rask",
+                     "cask_total", "spread_rask_cask", "margem_contribuicao_pct",
                      "classificacao", "alavanca"]
     _tabela(ws, risco[colunas_risco], linha_inicial=linha, congelar=False, filtro=False)
 
@@ -435,7 +442,8 @@ def _aba_linhas(wb: Workbook, janela: pd.DataFrame) -> None:
     colunas = [
         "linha_id", "linha", "corredor", "classe", "perfil", "km", "assentos",
         "frequencia_semanal", "partidas", "assentos_km", "passageiros",
-        "passageiros_km", "load_factor", "tarifa_media", "yield_pax_km", "rask",
+        "passageiros_km", "load_factor", "lf_equilibrio", "folga_lf",
+        "tarifa_media", "yield_pax_km", "rask",
         "cask_variavel", "cask_total", "spread_rask_cask", "receita",
         "custo_variavel", "margem_contribuicao", "margem_contribuicao_pct",
         "custo_fixo_rateado", "custo_total", "resultado", "classificacao",
@@ -456,6 +464,7 @@ def _aba_linhas(wb: Workbook, janela: pd.DataFrame) -> None:
     ultima = linha + len(tabela)
     _escala_de_cor(ws, "margem_contribuicao_pct", colunas, primeira_dados, ultima)
     _escala_de_cor(ws, "spread_rask_cask", colunas, primeira_dados, ultima)
+    _escala_de_cor(ws, "folga_lf", colunas, primeira_dados, ultima)
     _barra_de_dados(ws, "load_factor", colunas, primeira_dados, ultima)
     _impressao(ws)
 
@@ -549,6 +558,12 @@ def _aba_dicionario(wb: Workbook) -> None:
              "destroi caixa."),
             ("MC %", "MC / receita", "%",
              "A margem em percentual da receita, comparavel entre linhas."),
+            ("LF de equilibrio", "CASK total / yield", "%",
+             "A ocupacao que a linha precisaria ter, ao yield que ja pratica, para "
+             "empatar com o custo cheio. Sai da identidade RASK = yield x LF."),
+            ("Folga de ocupacao", "load factor - LF de equilibrio", "p.p.",
+             "O mesmo que o spread, em unidade que a operacao entende: 'faltam 8 "
+             "pontos de ocupacao' e acionavel, '-R$ 0,015 por assento-km' nao."),
             ("Spread RASK-CASK", "RASK - CASK total", "R$ por assento-km",
              "O resultado por assento oferecido. Positivo: a linha cobre o custo "
              "cheio. E o que classifica."),

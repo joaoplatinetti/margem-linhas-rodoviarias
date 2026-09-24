@@ -75,6 +75,42 @@ def test_janela_maior_que_o_dataset_falha(fato):
 
 
 # ---------------------------------------------------------------------------
+# Load factor de equilibrio
+# ---------------------------------------------------------------------------
+
+def test_equilibrio_fecha_a_identidade(janela):
+    """yield x LF de equilibrio tem que dar exatamente o CASK total."""
+    produto = janela["yield_pax_km"] * janela["lf_equilibrio"]
+    pd.testing.assert_series_equal(produto, janela["cask_total"], check_names=False)
+
+
+def test_equilibrio_diz_o_mesmo_que_o_spread(janela):
+    """Cobrir o custo cheio e ter ocupacao acima do equilibrio sao a MESMA coisa.
+
+    As duas formas existem porque falam linguas diferentes — uma e financeira,
+    a outra e operacional — mas elas nao podem discordar nunca. Se discordarem,
+    o grafico de ocupacao e a coluna de classificacao contariam historias
+    diferentes sobre a mesma linha.
+    """
+    por_spread = janela["spread_rask_cask"] >= 0
+    por_ocupacao = janela["load_factor"] >= janela["lf_equilibrio"] - 1e-12
+    assert (por_spread == por_ocupacao).all()
+    assert (por_spread == (janela["classificacao"] == "MANTER")).all()
+
+
+def test_rever_fica_abaixo_do_equilibrio_variavel(janela):
+    """REVER e, em ocupacao, nao alcancar nem o equilibrio do custo variavel."""
+    rever = janela["classificacao"] == "REVER"
+    abaixo = janela["load_factor"] <= janela["lf_equilibrio_variavel"] + 1e-12
+    assert (rever == abaixo).all()
+
+
+def test_folga_e_a_diferenca_das_duas_ocupacoes(janela):
+    esperado = janela["load_factor"] - janela["lf_equilibrio"]
+    pd.testing.assert_series_equal(janela["folga_lf"], esperado, check_names=False)
+
+
+# ---------------------------------------------------------------------------
 # Fronteiras da classificacao
 # ---------------------------------------------------------------------------
 

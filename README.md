@@ -31,6 +31,14 @@ A rede fecha com **MC 33,0%** e **resultado 15,3%**, load factor de **65,8%**,
 yield de R$ 0,2236 por passageiro-km e spread RASK−CASK de R$ 0,0224 por
 assento-km.
 
+![Matriz de decisão por linha](saida/imagens/matriz-decisao.png)
+
+A matriz desenha a própria regra: cada eixo é um dos dois testes, e as linhas de
+zero são os cortes de verdade. O quadrante superior esquerdo fica vazio **por
+construção** — não existe linha que cubra o custo cheio sem cobrir o variável, e
+é isso que faz a classificação ser uma escada de dois degraus e não quatro
+caixas.
+
 As seis linhas fora do MANTER:
 
 | Linha | Km | Classe | LF | Yield | RASK | CASK total | Spread | MC % | Decisão | Alavanca |
@@ -135,8 +143,33 @@ MC   = receita − custo variável          spread = RASK − CASK total
 A identidade **RASK = yield × LF** é a que dá a leitura de gestão: receita por
 assento oferecido tem dois caminhos, preço e ocupação, e o modelo aponta qual
 dos dois está faltando em cada linha (a coluna _Alavanca_, comparada contra a
-mediana da rede). `margem conferir` mede as quatro identidades no dataset
+mediana da rede). `margem conferir` mede as cinco identidades no dataset
 inteiro — o erro máximo é da ordem de 1e-17.
+
+A mesma identidade, resolvida para o load factor, dá o indicador mais acionável
+do modelo:
+
+```
+yield × LF = CASK   ⟹   LF de equilíbrio = CASK total / yield
+```
+
+É a ocupação que a linha precisaria ter, **ao preço que ela já pratica**, para
+empatar com o custo. Diz exatamente o que o spread diz, em unidade que a
+operação entende: "faltam 8 pontos de ocupação" mobiliza uma reunião de um jeito
+que "spread de −R$ 0,015 por assento-km" não mobiliza. Um teste fixa que as duas
+leituras nunca discordam.
+
+A conta só vale porque **nenhum componente de custo deste modelo depende do
+número de passageiros** — todos têm base km ou base partida. Se entrasse uma
+comissão por passageiro, o custo subiria junto com a ocupação e o equilíbrio
+viraria ponto fixo, não divisão.
+
+![Ocupação realizada x ocupação de equilíbrio](saida/imagens/load-factor-equilibrio.png)
+
+Manaus–Boa Vista precisaria de **81,9%** de ocupação e roda com 61,6%: não é uma
+linha que se conserta enchendo o ônibus. Campo Grande–Cuiabá, no outro extremo,
+está 0,4 p.p. acima do próprio equilíbrio — cobre o custo cheio por uma margem
+que a próxima alta de diesel consome.
 
 **Razão nunca se agrega.** Yield, RASK, CASK e load factor de um conjunto de
 linhas-mês são divisão das somas, nunca a média das razões: a média dá peso
@@ -176,7 +209,7 @@ o destinatário é alguém que vai abrir o arquivo e decidir, não um script):
 | Aba | O que tem |
 |---|---|
 | **Resumo** | KPIs da rede, contagem por decisão e as linhas em risco |
-| **Linhas** | a janela de 12 meses por linha, com semáforo, escala de cor no MC% e barra no load factor |
+| **Linhas** | a janela de 12 meses por linha, com semáforo, ocupação de equilíbrio, escala de cor no MC% e barra no load factor |
 | **Mensal** | o fato linha × mês completo, 480 registros |
 | **Custos** | as premissas com a base de cada componente e o custo unitário por linha |
 | **Dicionário** | a fórmula, a unidade e a leitura de cada indicador |
@@ -194,6 +227,8 @@ dim_linha ─┬─ fato_linha_mes ──┬─ dim_calendario
            └─ fato_classificacao
 ```
 
+![Esquema estrela](saida/imagens/esquema-estrela.png)
+
 **Os fatos guardam apenas o que é aditivo** — partidas, ASK, RPK, passageiros,
 receita e custo por componente. Nenhuma razão. A exceção é
 `fato_classificacao`, e é deliberada: aquele arquivo é o retrato de uma janela
@@ -202,12 +237,31 @@ linhas.
 
 ### `powerbi/medidas.dax`
 
-43 medidas comentadas: as bases aditivas, os indicadores unitários, margem e
+47 medidas comentadas: as bases aditivas, os indicadores unitários, margem e
 resultado, inteligência de tempo (`SAMEPERIODLASTYEAR`, janela móvel com
-`DATESINPERIOD`), a classificação em `SWITCH` e os cartões de decisão. Todas com
+`DATESINPERIOD`), a classificação em `SWITCH`, os cartões de decisão e a
+ocupação de equilíbrio. Todas com
 `DIVIDE` em vez de `/`, porque `DIVIDE` devolve BLANK no denominador zero
 enquanto `/` devolve Infinito, que contamina qualquer total que o contenha. O
 cabeçalho do arquivo traz a ordem de importação e a lista de relacionamentos.
+
+### `saida/imagens/` — as figuras
+
+Três figuras em **PNG (200 dpi)** para publicar e **SVG** para reeditar:
+`matriz-decisao`, `load-factor-equilibrio` e `esquema-estrela`.
+
+A paleta das classes é **azul / amarelo / vermelho, não verde / amarelo /
+vermelho**. O semáforo óbvio falha em daltonismo: medido em OKLab, o par
+verde–vermelho fica a ΔE 4,1 sob deuteranopia — praticamente a mesma cor para
+cerca de 8% dos leitores homens. O trio adotado mede ΔE 19,8 no pior par, e
+mesmo assim nenhuma região depende só da cor: todas carregam rótulo escrito.
+
+Duas decisões que valem registro: a matriz **desenha a regra** em vez de plotar
+yield × load factor com uma fronteira de equilíbrio — essa fronteira teria de ser
+única para a rede, e o CASK varia de R$ 0,10 a R$ 0,23 por assento-km entre um
+convencional e um leito, então a curva contradiria a cor de vários pontos. E no
+SVG, os rótulos que carregam contorno viram curva (limitação do matplotlib);
+título, eixos e marcações continuam editáveis.
 
 ---
 
@@ -222,8 +276,9 @@ uv run margem linhas        # o catálogo e o custo unitário por linha
 uv run margem indicadores   # a tabela de decisão
 uv run margem excel         # só a planilha
 uv run margem powerbi       # só os CSVs
+uv run margem imagens       # só as figuras (PNG + SVG)
 uv run margem conferir      # as identidades do modelo e o fecho do rateio
-uv run pytest               # 44 testes
+uv run pytest               # 52 testes
 ```
 
 Nenhum subcomando depende de estado deixado pelo anterior e não há pasta de
@@ -247,10 +302,11 @@ margem/
   indicadores.py   ASK, RPK, yield, RASK, CASK, MC, spread, classificação
   excel.py         a pasta de trabalho formatada
   powerbi.py       o esquema estrela
+  graficos.py      as três figuras do artigo
   pipeline.py      a CLI
 powerbi/medidas.dax
-saida/             versionada de propósito: o resultado sem precisar rodar nada
-testes/            44 testes
+saida/             versionada de propósito: Excel, CSVs e imagens sem rodar nada
+testes/            52 testes
 ```
 
 ## Limites declarados

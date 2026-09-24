@@ -161,7 +161,8 @@ def fato_classificacao(janela: pd.DataFrame) -> pd.DataFrame:
         "partidas", "assentos_km", "passageiros", "passageiros_km",
         "receita", "custo_variavel", "custo_fixo_rateado", "custo_total",
         "margem_contribuicao", "margem_contribuicao_pct", "resultado",
-        "load_factor", "yield_pax_km", "tarifa_media", "rask",
+        "load_factor", "lf_equilibrio", "folga_lf",
+        "yield_pax_km", "tarifa_media", "rask",
         "cask_variavel", "cask_total", "spread_rask_cask",
         "classificacao", "no_limite", "motivo", "alavanca",
     ]
@@ -169,8 +170,9 @@ def fato_classificacao(janela: pd.DataFrame) -> pd.DataFrame:
     saida = df[colunas].copy()
     saida["no_limite"] = saida["no_limite"].map({True: "sim", False: "nao"})
 
-    quatro_casas = ["margem_contribuicao_pct", "load_factor", "yield_pax_km",
-                    "rask", "cask_variavel", "cask_total", "spread_rask_cask"]
+    quatro_casas = ["margem_contribuicao_pct", "load_factor", "lf_equilibrio",
+                    "folga_lf", "yield_pax_km", "rask", "cask_variavel",
+                    "cask_total", "spread_rask_cask"]
     for coluna in quatro_casas:
         saida[coluna] = saida[coluna].round(4)
     for coluna in ["receita", "custo_variavel", "custo_fixo_rateado", "custo_total",

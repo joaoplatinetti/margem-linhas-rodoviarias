@@ -273,3 +273,34 @@ Título da decisão =
 //   Load factor, MC %, Resultado %, Var. % ... 0,0%
 //   Passageiros, Partidas, ASK, RPK, Km ...... #.##0
 // ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+//  7. OCUPAÇÃO DE EQUILÍBRIO
+//     Da identidade RASK = Yield x Load factor: se a receita por assento tem
+//     que empatar com o custo por assento, então yield x LF = CASK, e a
+//     ocupação que fecha a conta é CASK / yield.
+//
+//     A conta só vale porque nenhum componente de custo deste modelo depende do
+//     número de passageiros — todos têm base km ou base partida. Se entrar uma
+//     comissão por passageiro, o custo passa a subir junto com a ocupação e o
+//     equilíbrio vira ponto fixo, não divisão. Confira essa premissa antes de
+//     acrescentar componente ao modelo.
+// ---------------------------------------------------------------------------
+
+LF de equilíbrio = DIVIDE ( [CASK total], [Yield] )
+
+// A ocupação que paga só o custo variável. Abaixo dela, a linha é REVER.
+LF de equilíbrio (variável) = DIVIDE ( [CASK variável], [Yield] )
+
+// A mesma informação do spread, em unidade que a operação entende: "faltam 8
+// pontos de ocupação" é acionável de um jeito que "spread de -R$ 0,015 por
+// assento-km" não é. Formato: 0,0 "p.p.";-0,0 "p.p."
+Folga de ocupação = ( [Load factor] - [LF de equilíbrio] ) * 100
+
+// Passageiros que faltaram no período para a linha empatar, ao yield praticado.
+// Traduz a folga para a unidade em que a área comercial trabalha.
+Passageiros para o equilíbrio =
+    VAR Faltam = [LF de equilíbrio] - [Load factor]
+    RETURN
+        IF ( Faltam > 0, DIVIDE ( Faltam * [ASK], AVERAGE ( dim_linha[km] ) ) )
