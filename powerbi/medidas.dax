@@ -1,0 +1,275 @@
+// ===========================================================================
+//  margem-linhas-rodoviarias — medidas DAX
+// ===========================================================================
+//
+//  COMO USAR
+//  1. Power BI Desktop > Obter dados > Texto/CSV, importando os seis arquivos
+//     de `saida/powerbi/`. A codificação é UTF-8 (65001) e o separador é vírgula.
+//  2. Na tabela `dim_calendario`, marque `data` como coluna de data e use
+//     "Marcar como tabela de data" — sem isso, SAMEPERIODLASTYEAR e
+//     DATESINPERIOD devolvem resultados silenciosamente errados.
+//  3. Ordene `mes_ano` pela coluna `ordem_mes` (Ferramentas de coluna >
+//     Classificar por coluna). Sem isso o eixo do gráfico sai em ordem
+//     alfabética: "abr, ago, dez...".
+//  4. Crie os relacionamentos abaixo, todos um-para-muitos, filtro simples:
+//
+//       dim_linha[linha_id]            1 -> *  fato_linha_mes[linha_id]
+//       dim_linha[linha_id]            1 -> *  fato_custo_componente[linha_id]
+//       dim_linha[linha_id]            1 -> 1  fato_classificacao[linha_id]
+//       dim_calendario[data]           1 -> *  fato_linha_mes[data]
+//       dim_calendario[data]           1 -> *  fato_custo_componente[data]
+//       dim_componente_custo[componente] 1 -> * fato_custo_componente[componente]
+//
+//  5. Cole cada medida abaixo (Modelagem > Nova medida), uma por vez.
+//
+//  DUAS REGRAS QUE ATRAVESSAM O ARQUIVO INTEIRO
+//
+//  * **Toda razão é MEDIDA, nunca coluna calculada.** Yield, RASK, CASK e load
+//    factor são divisão de duas somas. Como coluna, cada linha do fato teria o
+//    seu próprio valor e o visual mostraria a MÉDIA desses valores — o que dá
+//    peso igual a fevereiro e a julho e devolve um número que não corresponde a
+//    nenhum período. Escrito como medida, a divisão acontece depois do filtro do
+//    usuário e o resultado está certo em qualquer recorte.
+//
+//  * **DIVIDE em vez de `/`.** DIVIDE devolve BLANK quando o denominador é zero,
+//    e BLANK simplesmente não aparece no visual. Com `/`, uma linha sem partidas
+//    no mês produz Infinito, que contamina qualquer total que a contenha.
+//
+//  O custo variável não existe como coluna no fato: ele é a soma dos cinco
+//  componentes. Isso é deliberado — acrescentar um componente novo muda uma
+//  medida só, e não há risco de a coluna somada discordar das partes.
+// ===========================================================================
+
+
+// ---------------------------------------------------------------------------
+//  1. BASES ADITIVAS
+//     As únicas coisas que podem ser somadas. Todo o resto é razão entre elas.
+// ---------------------------------------------------------------------------
+
+Receita = SUM ( fato_linha_mes[receita] )
+
+Passageiros = SUM ( fato_linha_mes[passageiros] )
+
+Partidas = SUM ( fato_linha_mes[partidas] )
+
+Km rodados = SUM ( fato_linha_mes[km_rodados] )
+
+// ASK = assento-km oferecido. O denominador de RASK, CASK e load factor.
+ASK = SUM ( fato_linha_mes[assentos_km] )
+
+// RPK = passageiro-km transportado. Neste dataset todo passageiro viaja o
+// trecho inteiro, então RPK = passageiros x km da linha.
+RPK = SUM ( fato_linha_mes[passageiros_km] )
+
+Custo variável =
+    SUM ( fato_linha_mes[custo_combustivel] )
+        + SUM ( fato_linha_mes[custo_pneus] )
+        + SUM ( fato_linha_mes[custo_manutencao] )
+        + SUM ( fato_linha_mes[custo_tripulacao] )
+        + SUM ( fato_linha_mes[custo_pedagio] )
+
+Custo fixo rateado = SUM ( fato_linha_mes[custo_fixo_rateado] )
+
+Custo total = [Custo variável] + [Custo fixo rateado]
+
+
+// ---------------------------------------------------------------------------
+//  2. INDICADORES UNITÁRIOS
+//     A identidade que sustenta a leitura: RASK = Yield x Load factor.
+//     Ela diz que receita por assento oferecido tem dois caminhos — preço e
+//     ocupação — e é o que permite apontar qual dos dois está faltando.
+// ---------------------------------------------------------------------------
+
+Load factor = DIVIDE ( [RPK], [ASK] )
+
+// Yield: preço por unidade de distância vendida. Comparável entre linhas de
+// tamanhos diferentes, ao contrário da tarifa média.
+Yield = DIVIDE ( [Receita], [RPK] )
+
+Tarifa média = DIVIDE ( [Receita], [Passageiros] )
+
+RASK = DIVIDE ( [Receita], [ASK] )
+
+CASK variável = DIVIDE ( [Custo variável], [ASK] )
+
+CASK total = DIVIDE ( [Custo total], [ASK] )
+
+Receita por km = DIVIDE ( [Receita], [Km rodados] )
+
+// Conferência da identidade. Deve dar zero (ou 1E-17) em qualquer recorte; se
+// der diferente, alguma medida virou coluna calculada em algum lugar.
+Erro da identidade RASK = [RASK] - [Yield] * [Load factor]
+
+
+// ---------------------------------------------------------------------------
+//  3. MARGEM E RESULTADO
+//     A margem de contribuição não leva o fixo rateado. É a diferença que
+//     separa "esta linha não deveria existir" de "esta linha precisa de ajuste".
+// ---------------------------------------------------------------------------
+
+Margem de contribuição = [Receita] - [Custo variável]
+
+MC % = DIVIDE ( [Margem de contribuição], [Receita] )
+
+MC por ASK = DIVIDE ( [Margem de contribuição], [ASK] )
+
+Resultado = [Receita] - [Custo total]
+
+Resultado % = DIVIDE ( [Resultado], [Receita] )
+
+// Spread = RASK - CASK total, ou seja, resultado por assento oferecido. É o
+// número que classifica a linha.
+Spread RASK-CASK = [RASK] - [CASK total]
+
+
+// ---------------------------------------------------------------------------
+//  4. TEMPO
+//     Exigem `dim_calendario` marcada como tabela de data.
+// ---------------------------------------------------------------------------
+
+Receita AA =
+    CALCULATE ( [Receita], SAMEPERIODLASTYEAR ( dim_calendario[data] ) )
+
+Var. % receita AA =
+    VAR Atual = [Receita]
+    VAR Anterior = [Receita AA]
+    RETURN
+        DIVIDE ( Atual - Anterior, Anterior )
+
+Passageiros AA =
+    CALCULATE ( [Passageiros], SAMEPERIODLASTYEAR ( dim_calendario[data] ) )
+
+Var. % passageiros AA =
+    DIVIDE ( [Passageiros] - [Passageiros AA], [Passageiros AA] )
+
+// Variação do yield em pontos de R$/pax-km, não em percentual: yield se move em
+// centavos e a variação percentual de um número pequeno engana a leitura.
+Var. yield AA =
+    [Yield] - CALCULATE ( [Yield], SAMEPERIODLASTYEAR ( dim_calendario[data] ) )
+
+// Janela móvel de 12 meses, ancorada no último mês do contexto atual. É a mesma
+// janela que o pipeline usa para classificar: um mês isolado faz uma linha de
+// lazer alternar entre MANTER e REVER três vezes ao ano.
+Receita 12M =
+    CALCULATE (
+        [Receita],
+        DATESINPERIOD ( dim_calendario[data], MAX ( dim_calendario[data] ), -12, MONTH )
+    )
+
+RASK 12M =
+    CALCULATE (
+        [RASK],
+        DATESINPERIOD ( dim_calendario[data], MAX ( dim_calendario[data] ), -12, MONTH )
+    )
+
+CASK total 12M =
+    CALCULATE (
+        [CASK total],
+        DATESINPERIOD ( dim_calendario[data], MAX ( dim_calendario[data] ), -12, MONTH )
+    )
+
+Spread 12M = [RASK 12M] - [CASK total 12M]
+
+MC % 12M =
+    CALCULATE (
+        [MC %],
+        DATESINPERIOD ( dim_calendario[data], MAX ( dim_calendario[data] ), -12, MONTH )
+    )
+
+// Sazonalidade medida, não a premissa: quanto o mês rendeu em relação à média
+// dos 12 meses que terminam nele. Serve para conferir se a curva do dataset é a
+// que o README descreve.
+Índice sazonal medido =
+    VAR MédiaMóvel =
+        DIVIDE (
+            CALCULATE (
+                [Passageiros],
+                DATESINPERIOD ( dim_calendario[data], MAX ( dim_calendario[data] ), -12, MONTH )
+            ),
+            12
+        )
+    RETURN
+        DIVIDE ( [Passageiros], MédiaMóvel )
+
+
+// ---------------------------------------------------------------------------
+//  5. DECISÃO
+//     A regra em dois degraus. A ordem dos testes importa: MC negativa também
+//     produz spread negativo, e testar o spread primeiro esconderia o caso
+//     grave (REVER) dentro do caso administrável (AJUSTAR).
+// ---------------------------------------------------------------------------
+
+Classificação 12M =
+    VAR MC = CALCULATE (
+        [Margem de contribuição],
+        DATESINPERIOD ( dim_calendario[data], MAX ( dim_calendario[data] ), -12, MONTH )
+    )
+    VAR Spread = [Spread 12M]
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( MC ), BLANK (),
+            MC <= 0, "REVER",            // não cobre nem o custo variável
+            Spread < 0, "AJUSTAR",       // cobre o variável, não o fixo rateado
+            "MANTER"                     // cobre o custo cheio
+        )
+
+// Semáforo para formatação condicional "Formato por > Valor do campo".
+Cor da classificação =
+    SWITCH (
+        SELECTEDVALUE ( fato_classificacao[classificacao] ),
+        "MANTER", "#C6EFCE",
+        "AJUSTAR", "#FFEB9C",
+        "REVER", "#FFC7CE",
+        "#FFFFFF"
+    )
+
+// Contagens sobre o retrato já fechado. `fato_classificacao` tem uma linha por
+// linha de ônibus, então aqui é contagem de linhas e não de registros de fato.
+Linhas = DISTINCTCOUNT ( fato_classificacao[linha_id] )
+
+Linhas a manter =
+    CALCULATE ( [Linhas], fato_classificacao[classificacao] = "MANTER" )
+
+Linhas a ajustar =
+    CALCULATE ( [Linhas], fato_classificacao[classificacao] = "AJUSTAR" )
+
+Linhas a rever =
+    CALCULATE ( [Linhas], fato_classificacao[classificacao] = "REVER" )
+
+// Quantas cobrem o custo cheio com folga estreita. Não é uma quarta classe: é
+// um aviso sobre as MANTER que uma alta de diesel derruba.
+Linhas no limite =
+    CALCULATE ( [Linhas], fato_classificacao[no_limite] = "sim" )
+
+// Receita exposta: quanto da receita está em linha que não cobre o custo cheio.
+// É o número que dimensiona o problema — duas linhas ruins de 4% da receita e
+// duas linhas ruins de 30% pedem urgências diferentes.
+% receita exposta =
+    DIVIDE (
+        CALCULATE (
+            SUM ( fato_classificacao[receita] ),
+            fato_classificacao[classificacao] IN { "AJUSTAR", "REVER" }
+        ),
+        SUM ( fato_classificacao[receita] )
+    )
+
+// Título dinâmico para o cartão da decisão (Formato > Título > fx).
+Título da decisão =
+    "Decisão por linha — janela de 12 meses ("
+        & MIN ( fato_classificacao[janela_inicio] ) & " a "
+        & MAX ( fato_classificacao[janela_fim] ) & ")"
+
+
+// ---------------------------------------------------------------------------
+//  6. FORMATO SUGERIDO (Ferramentas de medida > Formato)
+// ---------------------------------------------------------------------------
+//   Receita, Custo *, Margem, Resultado ...... R$ #.##0;-R$ #.##0
+//   Tarifa média ............................. R$ #.##0,00
+//   Yield, RASK, CASK, Spread, MC por ASK .... R$ #.##0,0000   (são centavos:
+//                                              com duas casas, todas as linhas
+//                                              viram "0,12" e a diferença entre
+//                                              elas desaparece)
+//   Load factor, MC %, Resultado %, Var. % ... 0,0%
+//   Passageiros, Partidas, ASK, RPK, Km ...... #.##0
+// ---------------------------------------------------------------------------

@@ -1,0 +1,15 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# macos
+.DS_Store
+
+# A pasta saida/ E VERSIONADA de proposito: este repo e portfolio, e quem abre
+# no navegador precisa ver o .xlsx e os CSVs sem instalar nada. Tudo ali se
+# refaz com `margem tudo`, que e deterministico (seed em margem/config.py).
+# O que nao entra e lixo do Excel ao abrir o arquivo:
+~$*.xlsx

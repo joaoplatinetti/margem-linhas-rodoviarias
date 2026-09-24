@@ -1,0 +1,7 @@
+﻿ordem,componente,rotulo,grupo,base,entra_na_mc,premissa,custo_periodo,participacao
+1,custo_combustivel,Combustivel,variavel,km,sim,diesel R$ 6.15/l / consumo km/l da classe,47891445.29,0.4225
+2,custo_pneus,Pneus,variavel,km,sim,R$ 0.26/km (jogo / vida util),5686218.2,0.0502
+3,custo_manutencao,Manutencao,variavel,km,sim,R$ 0.58/km x fator do corredor,13460902.16,0.1187
+4,custo_tripulacao,Tripulacao,variavel,partida,sim,R$ 31.00/h x duracao x motoristas + diaria + pernoite,19225951.6,0.1696
+5,custo_pedagio,Pedagio,variavel,km,sim,R$/km do corredor,3339771.9,0.0295
+6,custo_fixo_rateado,Fixo rateado,fixo,rateio por km,nao,R$ 990.000/mes rateados pelos km do mes,23760000.0,0.2096

@@ -1,0 +1,32 @@
+[project]
+name = "margem-linhas-rodoviarias"
+version = "0.1.0"
+description = "Margem por linha de onibus interestadual: modelo de custo, RASK/CASK/yield/load factor e decisao de manter, ajustar ou rever. Dataset sintetico."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    # A planilha e formatada celula por celula (numero, cor, painel congelado,
+    # escala de cor), entao openpyxl entra direto e nao via pandas.to_excel.
+    "openpyxl>=3.1",
+]
+
+[project.scripts]
+margem = "margem.pipeline:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.15"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Pacote na raiz do repo, nao em src/.
+module-root = ""
+module-name = "margem"
+
+[tool.pytest.ini_options]
+testpaths = ["testes"]
+pythonpath = ["."]
