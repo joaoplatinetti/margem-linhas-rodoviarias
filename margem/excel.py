@@ -683,9 +683,35 @@ def _aba_metodologia(wb: Workbook, fato: pd.DataFrame) -> None:
 # Montagem
 # ---------------------------------------------------------------------------
 
+def _propriedades(wb: Workbook, fato: pd.DataFrame) -> None:
+    """Metadados fixos, para o arquivo versionado nao mudar a cada execucao.
+
+    O openpyxl carimba a data de criacao no momento do save. Como a saida e
+    versionada no repo, isso faria `margem tudo` produzir um arquivo diferente
+    todo dia sem uma unica celula ter mudado — e o `git status` sujo deixaria de
+    significar qualquer coisa. A data usada e a do ultimo mes do dataset, que e
+    a informacao que o arquivo de fato carrega.
+
+    Os carimbos internos do zip continuam variando (e limitacao do openpyxl),
+    entao os bytes ainda mudam; o que isto resolve e a metadata visivel em
+    Arquivo > Informacoes.
+    """
+    ultimo = pd.Period(max(fato["ano_mes"]), freq="M").to_timestamp(how="end")
+    wb.properties.creator = "margem-linhas-rodoviarias"
+    wb.properties.lastModifiedBy = "margem-linhas-rodoviarias"
+    wb.properties.title = "Margem por linha rodoviaria"
+    wb.properties.description = (
+        "Dataset sintetico. Cidades e distancias reais; operacao, demanda, "
+        "tarifa e custo gerados por codigo a partir de premissas declaradas."
+    )
+    wb.properties.created = ultimo
+    wb.properties.modified = ultimo
+
+
 def exportar(fato: pd.DataFrame, janela: pd.DataFrame, catalogo: pd.DataFrame) -> str:
     """Monta e grava a pasta de trabalho. Devolve o caminho."""
     wb = Workbook()
+    _propriedades(wb, fato)
     _aba_resumo(wb, fato, janela)
     _aba_linhas(wb, janela)
     _aba_mensal(wb, fato)
