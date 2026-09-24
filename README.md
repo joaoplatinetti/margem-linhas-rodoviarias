@@ -329,6 +329,72 @@ uv run margem estresse --cenarios 1000  # mais sorteios
 
 ---
 
+## O histórico não mede elasticidade
+
+O tornado acima diz que a tarifa é a premissa mais poderosa do modelo — e mede
+isso supondo demanda que não reage a preço. A pergunta seguinte é obrigatória:
+**quanto a demanda reage?**
+
+A resposta honesta é que o histórico não conta. E dá para *provar* isso, porque
+num modelo sintético a resposta certa é conhecida: o gerador cria demanda com
+elasticidade **−1,2**, declarada, e quatro especificações tentam recuperá-la do
+painel de 20 linhas × 24 meses.
+
+![Calibração do estimador](saida/imagens/elasticidade-calibracao.png)
+
+Uma rodada isolada não distingue dois defeitos muito diferentes. Rodando contra
+**várias** elasticidades verdadeiras, eles se separam:
+
+| Especificação | Inclinação | Deslocamento | Diagnóstico |
+|---|---:|---:|---|
+| OLS simples | **0,00** | −1,04 | não responde à verdade |
+| + efeito fixo de linha | 1,00 | **+2,23** | acompanha, com sinal trocado |
+| + efeito fixo de mês | **0,00** | −1,05 | não responde à verdade |
+| + linha e mês | 1,00 | **+0,54** | acompanha, ainda deslocada |
+
+**Inclinação zero é o caso grave.** O OLS simples devolve −1,04 tanto com
+elasticidade verdadeira −1,2 quanto com ela em **zero**. O número é plausível,
+é estável entre execuções, e não mede nada: ele só reflete que linha cara é
+linha de leito, que tem menos poltrona. É exatamente o tipo de resultado que vai
+para o slide sem ninguém desconfiar.
+
+E a correção óbvia piora: com efeito fixo de linha a estimativa vira **+1,03** —
+"preço alto atrai passageiro". Não é erro de conta. É que preço e demanda sobem
+juntos no pico por motivos que nada têm a ver com um causar o outro: a tarifa
+média sobe em julho porque sobra menos promocional, e a demanda sobe em julho
+porque é férias.
+
+### O teste que mediria
+
+![Desenho do teste de preço](saida/imagens/desenho-do-teste.png)
+
+O que identifica é variação de preço que não acompanhe a demanda — ou seja, um
+teste. O erro-padrão cai com **o passo de preço vezes a raiz do número de
+observações**, então passo pequeno não se compensa com paciência:
+
+| Passo de preço | Linhas-mês necessárias | Equivale a |
+|---:|---:|---|
+| 2% (o que já existe) | 1.014 | 51 meses com as 20 linhas |
+| 5% | 163 | 9 meses |
+| 10% | 41 | 3 meses |
+| 15% | 19 | 1 mês |
+
+Para medir a elasticidade a ±0,20 com a variação de 2% que existe hoje seriam
+**quatro anos de histórico**, supondo que nada mude nesse tempo — e ao longo de
+quatro anos tudo muda.
+
+Duas ressalvas que o próprio código mede, em vez de supor: o tamanho escala com
+o **quadrado** do ruído mensal da demanda (aqui 6%; com 12%, quadruplica), e o
+erro é agrupado por linha, então **pôr mais linhas no teste rende mais que
+esperar mais meses** com as mesmas.
+
+```bash
+uv run margem elasticidade                    # a demonstração completa
+uv run margem elasticidade --tolerancia 0.10  # teste mais exigente
+```
+
+---
+
 ## As saídas
 
 ### `saida/margem-linhas-rodoviarias.xlsx`
@@ -380,10 +446,10 @@ cabeçalho do arquivo traz a ordem de importação e a lista de relacionamentos.
 
 ### `saida/imagens/` — as figuras
 
-Oito figuras em **PNG (200 dpi)** para publicar e **SVG** para reeditar:
+Dez figuras em **PNG (200 dpi)** para publicar e **SVG** para reeditar:
 `matriz-decisao`, `load-factor-equilibrio`, `esquema-estrela`,
-`rateio-por-base`, `ganho-do-corte`, `ponto-de-ruptura`, `tornado-premissas` e
-`probabilidade-classificacao`.
+`rateio-por-base`, `ganho-do-corte`, `ponto-de-ruptura`, `tornado-premissas`,
+`probabilidade-classificacao`, `elasticidade-calibracao` e `desenho-do-teste`.
 
 A paleta das classes é **azul / amarelo / vermelho, não verde / amarelo /
 vermelho**. O semáforo óbvio falha em daltonismo: medido em OKLab, o par
@@ -415,8 +481,9 @@ uv run margem imagens       # só as figuras (PNG + SVG)
 uv run margem rateio        # o efeito da base de rateio
 uv run margem corte L15     # o efeito de cortar uma linha
 uv run margem estresse      # ruptura, sensibilidade e probabilidade
+uv run margem elasticidade  # por que o histórico não mede elasticidade
 uv run margem conferir      # as identidades do modelo e o fecho do rateio
-uv run pytest               # 95 testes
+uv run pytest               # 114 testes
 ```
 
 Nenhum subcomando depende de estado deixado pelo anterior e não há pasta de
@@ -442,11 +509,12 @@ margem/
   powerbi.py       o esquema estrela
   malha.py         bases de rateio e simulação de corte
   estresse.py      cenários, ponto de ruptura, tornado e Monte Carlo
-  graficos.py      as oito figuras
+  elasticidade.py  painel com resposta conhecida, estimador e desenho de teste
+  graficos.py      as dez figuras
   pipeline.py      a CLI
 powerbi/medidas.dax
 saida/             versionada de propósito: Excel, CSVs e imagens sem rodar nada
-testes/            95 testes
+testes/            114 testes
 ```
 
 ## Limites declarados
@@ -465,7 +533,8 @@ testes/            95 testes
 - **A perda de tráfego de conexão não está modelada.** A simulação de corte
   redistribui o custo fixo, mas a malha aqui não é conectada: inventar uma taxa
   de recaptura produziria um número que parece medido sem ser.
-- **A elasticidade-preço não está modelada.** A tarifa varia com o mix e com a
-  pressão competitiva declarada, não com uma curva de resposta da demanda.
-  Estimar elasticidade exigiria variação de preço que este dataset não tem — e
-  inventá-la produziria um número que pareceria medido sem ser.
+- **A elasticidade-preço vale ZERO no modelo base, e isso é uma afirmação, não
+  uma omissão.** Todos os números das seções acima valem sob essa premissa. O
+  módulo de elasticidade liga a resposta a preço num valor conhecido para
+  demonstrar que o histórico não a mede — e aí volta a desligá-la, para o
+  dataset publicado continuar sendo o mesmo.

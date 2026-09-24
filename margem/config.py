@@ -266,6 +266,19 @@ CLASSIFICACOES = ("MANTER", "AJUSTAR", "REVER")
 FATOR_DEMANDA = 1.0
 FATOR_TARIFA = 1.0
 
+# Elasticidade-preco da demanda: quanto a ocupacao responde a tarifa.
+#
+# **ZERO no modelo base, e isso e uma afirmacao, nao uma omissao.** O dataset
+# publicado nas ramificacoes 1 a 3 nao tem resposta de demanda a preco, e todos
+# os numeros daquelas secoes valem sob essa premissa — inclusive a linha da
+# tarifa no tornado, que por isso vem com aviso na propria figura.
+#
+# `margem/elasticidade.py` liga este parametro num valor CONHECIDO e tenta
+# recuperar ele de volta do dado observacional. E o unico jeito de demonstrar
+# que um estimador falha: com dado real nao se sabe a resposta certa, entao nao
+# se sabe se o estimador errou.
+ELASTICIDADE_PRECO = 0.0
+
 # Incerteza declarada de cada premissa, como desvio-padrao de um fator
 # multiplicativo lognormal. Sao JUIZOS, nao medicoes — e e por isso que estao
 # aqui, visiveis, e nao dentro do sorteio.

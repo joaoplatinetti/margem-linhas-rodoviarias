@@ -99,14 +99,47 @@ def gerar() -> pd.DataFrame:
         bloco["km_rodados"] = bloco["partidas"] * linha.km
         bloco["assentos_km"] = bloco["km_rodados"] * linha.assentos
 
-        # --- demanda ------------------------------------------------------
         sazonal = _sazonalidade_por_linha(indice, linha.amplitude_sazonal)
+
+        # Os dois sorteios saem AQUI, nesta ordem, antes de qualquer uso. A
+        # ordem importa: o gerador e deterministico pela semente, e trocar a
+        # sequencia de saques mudaria o dataset inteiro — inclusive os numeros
+        # ja publicados nas secoes anteriores do README.
+        ruido_demanda = ruido(config.RUIDO_DEMANDA, n_meses)
+        ruido_tarifa = ruido(config.RUIDO_TARIFA, n_meses)
+
+        # --- tarifa -------------------------------------------------------
+        # A tarifa media realizada acompanha o mix: no pico ha menos promocional
+        # e ela sobe. Tarifa media constante em 24 meses seria a segunda coisa
+        # mais improvavel deste dataset, depois de load factor 1.
+        #
+        # E e justamente essa co-variacao com a sazonalidade que torna a
+        # elasticidade dificil de medir depois: preco e demanda sobem juntos no
+        # pico por motivos que nada tem a ver com um causar o outro.
+        tarifa_referencia = linha.tarifa_km_ref * linha.km
+        bloco["tarifa_media"] = (
+            tarifa_referencia
+            * (sazonal ** config.TARIFA_SENSIBILIDADE_SAZONAL)
+            * ruido_tarifa
+        ).round(2)
+
+        # --- demanda ------------------------------------------------------
+        # A resposta ao preco entra ANTES da sazonalidade e do ruido, sobre a
+        # tarifa ja arredondada — que e o preco observavel no dado, e portanto o
+        # unico que um estimador teria para trabalhar.
+        # Com `ELASTICIDADE_PRECO = 0` o fator vale exatamente 1 e o dataset e
+        # identico ao publicado.
+        resposta_ao_preco = (
+            bloco["tarifa_media"].to_numpy() / tarifa_referencia
+        ) ** config.ELASTICIDADE_PRECO
+
         ocupacao = (
             linha.ocupacao_base
             * config.FATOR_DEMANDA          # 1,0 no modelo base; ver config
+            * resposta_ao_preco
             * sazonal
             * bloco["fator_tendencia"].to_numpy()
-            * ruido(config.RUIDO_DEMANDA, n_meses)
+            * ruido_demanda
         )
         # O teto e o que mantem o load factor no mundo real. Guardamos quanto
         # ficou represado: demanda batendo no teto e exatamente o sinal de que a
@@ -119,17 +152,7 @@ def gerar() -> pd.DataFrame:
             ocupacao * linha.assentos * bloco["partidas"]
         ).astype(int)
         bloco["passageiros_km"] = bloco["passageiros"] * linha.km
-
-        # --- tarifa -------------------------------------------------------
-        # A tarifa media realizada acompanha o mix: no pico ha menos promocional
-        # e ela sobe. Tarifa media constante em 24 meses seria a segunda coisa
-        # mais improvavel deste dataset, depois de load factor 1.
-        bloco["tarifa_media"] = (
-            linha.tarifa_km_ref
-            * linha.km
-            * (sazonal ** config.TARIFA_SENSIBILIDADE_SAZONAL)
-            * ruido(config.RUIDO_TARIFA, n_meses)
-        ).round(2)
+        bloco["tarifa_referencia"] = tarifa_referencia
         bloco["receita"] = (bloco["passageiros"] * bloco["tarifa_media"]).round(2)
 
         blocos.append(bloco)

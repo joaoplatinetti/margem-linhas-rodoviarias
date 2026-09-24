@@ -67,6 +67,14 @@ AMARELO = "#eda100"
 VERMELHO = "#d03b3b"
 AZUL_CLARO = "#cde2fb"
 LARANJA = "#eb6834"   # segunda enfase; par com o azul mede Delta E 24,7 sob protanopia
+AGUA = "#1baf7a"
+AMARELO_SERIE = "#eda100"
+
+# Quatro series categoricas, na ordem validada. Pior par adjacente: Delta E 9,1
+# sob protanopia, 22,9 em visao normal. Agua e amarelo ficam abaixo de 3:1 de
+# contraste com a superficie, entao as duas SEMPRE andam com rotulo direto —
+# e a regra de alivio da paleta, nao preferencia.
+SERIES = [AZUL, LARANJA, AGUA, AMARELO_SERIE]
 
 COR_CLASSE = {"MANTER": AZUL, "AJUSTAR": AMARELO, "REVER": VERMELHO}
 MARCA_CLASSE = {"MANTER": "o", "AJUSTAR": "s", "REVER": "D"}
@@ -933,6 +941,179 @@ def probabilidade_classificacao(por_linha: pd.DataFrame, n: int) -> list[str]:
             y=-0.10)
     return _gravar(fig, "probabilidade-classificacao")
 
+
+# ---------------------------------------------------------------------------
+# 9. Calibracao do estimador de elasticidade
+# ---------------------------------------------------------------------------
+
+def calibracao_elasticidade(calibracao: pd.DataFrame) -> list[str]:
+    """Estimativa contra verdade, uma linha por especificacao.
+
+    A figura existe para separar dois defeitos que uma rodada unica confunde:
+
+    - **inclinacao zero** — a estimativa nao se move quando a verdade se move.
+      O numero na tela nao tem relacao com o fenomeno, e continua parecendo
+      razoavel. E o caso mais perigoso.
+    - **inclinacao 1 com deslocamento** — acompanha a verdade, mas errado por um
+      valor constante que, com dado real, ninguem conhece.
+
+    A diagonal tracejada e o que um estimador que identifica faria. Nenhuma das
+    quatro chega perto dela, e e esse o ponto.
+    """
+    _estilo()
+    fig, ax = plt.subplots(figsize=(10.5, 7.4))
+
+    ajustes = calibracao.attrs["ajustes"].set_index("especificacao")
+    nomes = list(ajustes.index)
+    limites = (
+        float(calibracao["verdadeira"].min()) - 0.15,
+        float(calibracao["verdadeira"].max()) + 0.15,
+    )
+
+    # A diagonal: onde um estimador que identifica cairia.
+    ax.plot(limites, limites, color=TINTA_FRACA, linewidth=1.4,
+            linestyle=(0, (4, 3)), zorder=2)
+    ax.text(limites[0] + 0.08, limites[0] + 0.02,
+            "estimador que identifica\n(inclinacao 1, sem deslocamento)",
+            fontsize=8.4, color=TINTA_FRACA, ha="left", va="bottom",
+            linespacing=1.6, style="italic", zorder=2)
+
+    # As duas especificacoes de inclinacao zero caem praticamente em cima uma da
+    # outra — e isso E o achado, nao um estorvo. Larguras diferentes deixam as
+    # duas visiveis sem deslocar nenhum ponto, que seria falsear o dado.
+    larguras = {nome: (3.2 if indice == 0 else 1.8)
+                for indice, nome in enumerate(nomes)}
+
+    pontas = []
+    for cor, nome in zip(SERIES, nomes):
+        recorte = calibracao[calibracao["especificacao"] == nome].sort_values("verdadeira")
+        ax.plot(recorte["verdadeira"], recorte["estimada"], color=cor,
+                linewidth=larguras[nome], zorder=4, solid_capstyle="round")
+        ax.scatter(recorte["verdadeira"], recorte["estimada"], s=46,
+                   facecolor=cor, edgecolor=SUPERFICIE, linewidth=1.5, zorder=5)
+        ponta = recorte.iloc[-1]
+        pontas.append((float(ponta["estimada"]), cor, nome))
+
+    # Rotulo direto em TODA serie: agua e amarelo nao alcancam 3:1 de contraste
+    # com a superficie, e a paleta exige alivio por rotulo quando isso acontece.
+    # Onde dois rotulos se aproximam, o de baixo desce e ganha linha de chamada
+    # — empilhar sem chamada descolaria o texto da linha.
+    espacamento = 0.30
+    ultimo = None
+    for valor, cor, nome in sorted(pontas, reverse=True):
+        destino = valor if ultimo is None else min(valor, ultimo - espacamento)
+        ultimo = destino
+        recuo = 0.08
+        if abs(destino - valor) > 1e-9:
+            ax.plot([limites[1] + 0.01, limites[1] + recuo], [valor, destino],
+                    color=TINTA_FRACA, linewidth=0.7, zorder=4)
+        inclinacao = ajustes.loc[nome, "inclinacao"]
+        texto = ax.text(
+            limites[1] + recuo, destino,
+            f"{nome}\ninclinacao {_dec(inclinacao, 2)}",
+            fontsize=8.5, color=cor, fontweight="bold", ha="left", va="center",
+            linespacing=1.5, zorder=6,
+        )
+        texto.set_path_effects([efeitos.withStroke(linewidth=3.0, foreground=SUPERFICIE)])
+
+    ax.axhline(0, color=EIXO, linewidth=1.0, zorder=1)
+    ax.set_xlim(limites[0], limites[1] + 1.45)
+    # Marcacao so na faixa em que EXISTE dado. A area a direita e espaco de
+    # rotulo, e deixar o eixo marcado ate la sugeriria um dominio que nao foi
+    # simulado.
+    ax.set_xticks(sorted(calibracao["verdadeira"].unique()))
+    ax.set_ylim(-2.6, 2.6)
+    ax.set_xlabel("Elasticidade VERDADEIRA usada no gerador")
+    ax.set_ylabel("Elasticidade ESTIMADA do painel")
+    for eixo in (ax.xaxis, ax.yaxis):
+        eixo.set_major_formatter(lambda v, _: _dec(v, 1))
+    ax.grid(color=GRADE, linewidth=0.7)
+    ax.set_axisbelow(True)
+    for lado in ("top", "right"):
+        ax.spines[lado].set_visible(False)
+
+    ax.set_title("Nenhuma especificacao identifica a elasticidade", fontsize=15,
+                 fontweight="bold", color=TINTA, loc="left", pad=22)
+    ax.text(0, 1.015,
+            "Painel de 20 linhas x 24 meses, gerado com elasticidade conhecida. "
+            "So com dado sintetico da para saber que o estimador errou.",
+            transform=ax.transAxes, fontsize=9.5, color=TINTA_2, va="bottom")
+
+    _rodape(fig, "Inclinacao zero e o caso grave: OLS simples devolve -1,04 tanto "
+                 "com elasticidade verdadeira -1,2 quanto com ela em ZERO. O numero "
+                 "e plausivel, estavel, e nao mede nada —\nele so reflete que linha "
+                 "cara e linha de leito, que tem menos poltrona. Com efeito fixo de "
+                 "linha a estimativa acompanha a verdade, mas deslocada em +2,2: "
+                 "preco alto 'atrai' passageiro.")
+    return _gravar(fig, "elasticidade-calibracao")
+
+
+# ---------------------------------------------------------------------------
+# 10. O desenho do teste de preco
+# ---------------------------------------------------------------------------
+
+def desenho_do_teste(desenhos: dict[float, pd.DataFrame]) -> list[str]:
+    """Quantas observacoes o teste precisa, por passo de preco e por tolerancia.
+
+    Escala logaritmica no eixo vertical porque a exigencia cai com o QUADRADO do
+    passo: de 2% para 10% o tamanho necessario cai vinte e cinco vezes. Em
+    escala linear, tudo abaixo de 5% vira uma linha colada no eixo e a leitura
+    se perde justamente na faixa que interessa.
+    """
+    _estilo()
+    fig, ax = plt.subplots(figsize=(10.5, 6.8))
+
+    for cor, (tolerancia, tabela) in zip(SERIES, sorted(desenhos.items())):
+        ax.plot(tabela["passo_de_preco"], tabela["observacoes"], color=cor,
+                linewidth=2.2, zorder=4, solid_capstyle="round")
+        ax.scatter(tabela["passo_de_preco"], tabela["observacoes"], s=44,
+                   facecolor=cor, edgecolor=SUPERFICIE, linewidth=1.5, zorder=5)
+        ponta = tabela.iloc[-1]
+        texto = ax.text(float(ponta["passo_de_preco"]) + 0.004,
+                        float(ponta["observacoes"]),
+                        f"tolerancia ±{_dec(tolerancia, 2)}",
+                        fontsize=8.6, color=cor, fontweight="bold",
+                        ha="left", va="center", zorder=6)
+        texto.set_path_effects([efeitos.withStroke(linewidth=3.0, foreground=SUPERFICIE)])
+
+    # Onde a operacao esta hoje: a variacao de preco que existe sem teste nenhum.
+    base = sorted(desenhos.values())[0] if False else next(iter(desenhos.values()))
+    hoje = config.RUIDO_TARIFA
+    ax.axvline(hoje, color=TINTA, linewidth=1.2, linestyle=(0, (3, 2)), zorder=3)
+    ax.text(hoje + 0.003, ax.get_ylim()[1],
+            f"variacao que existe hoje\nsem teste nenhum: {_pct(hoje, 0)}",
+            fontsize=8.6, color=TINTA, ha="left", va="top", linespacing=1.6, zorder=6)
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Passo de preco do teste (variacao aleatoria aplicada a tarifa)")
+    ax.set_ylabel("Observacoes linha-mes necessarias")
+    ax.xaxis.set_major_formatter(lambda v, _: _pct(v, 0))
+    ax.yaxis.set_major_formatter(lambda v, _: f"{int(v):,}".replace(",", "."))
+    ax.grid(color=GRADE, linewidth=0.7, which="both")
+    ax.set_axisbelow(True)
+    ax.set_xlim(0.012, float(max(t["passo_de_preco"].max() for t in desenhos.values())) + 0.05)
+    for lado in ("top", "right"):
+        ax.spines[lado].set_visible(False)
+
+    referencia = next(iter(desenhos.values())).attrs
+    ax.set_title("O teste que mediria a elasticidade", fontsize=15,
+                 fontweight="bold", color=TINTA, loc="left", pad=22)
+    ax.text(0, 1.015,
+            "O erro-padrao cai com o passo de preco VEZES a raiz do numero de "
+            "observacoes. Passo pequeno nao se compensa com paciencia.",
+            transform=ax.transAxes, fontsize=9.5, color=TINTA_2, va="bottom")
+
+    _rodape(fig, "Com os 2% de variacao que ja existem, medir a elasticidade a "
+                 "±0,20 pediria mais de mil linhas-mes — quatro anos de historico "
+                 "de uma malha de 20 linhas, supondo que nada mude nesse tempo.\n"
+                 "O tamanho escala com o QUADRADO do ruido mensal da demanda, aqui "
+                 f"{_pct(referencia['ruido_demanda'], 0)}: uma operacao com o dobro "
+                 "de ruido precisa de quatro vezes mais observacoes.\n"
+                 "E o erro e agrupado por linha, entao precisao vem do numero de "
+                 "LINHAS no teste: por mais linhas e caminho mais curto que "
+                 "esperar mais meses.")
+    return _gravar(fig, "desenho-do-teste")
+
 # ---------------------------------------------------------------------------
 
 def exportar(janela: pd.DataFrame, comparacao: pd.DataFrame | None = None,
@@ -940,7 +1121,9 @@ def exportar(janela: pd.DataFrame, comparacao: pd.DataFrame | None = None,
              cascata: dict | None = None,
              sensibilidade: pd.DataFrame | None = None,
              ruptura: pd.DataFrame | None = None,
-             incerteza: dict | None = None) -> dict[str, list[str]]:
+             incerteza: dict | None = None,
+             calibracao: pd.DataFrame | None = None,
+             desenhos: dict | None = None) -> dict[str, list[str]]:
     """As figuras. Devolve nome -> caminhos gravados.
 
     As duas da ramificacao 1 sao opcionais para `margem imagens` continuar
@@ -963,4 +1146,8 @@ def exportar(janela: pd.DataFrame, comparacao: pd.DataFrame | None = None,
     if incerteza is not None:
         figuras["probabilidade-classificacao"] = probabilidade_classificacao(
             incerteza["por_linha"], incerteza["n"])
+    if calibracao is not None:
+        figuras["elasticidade-calibracao"] = calibracao_elasticidade(calibracao)
+    if desenhos is not None:
+        figuras["desenho-do-teste"] = desenho_do_teste(desenhos)
     return figuras

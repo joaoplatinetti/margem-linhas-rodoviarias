@@ -17,6 +17,7 @@ se o dado viesse de uma extracao cara — aqui ele nao vem.
     margem rateio        o efeito da base de rateio do custo fixo
     margem corte LINHA   o que acontece com a malha ao cortar uma linha
     margem estresse      ponto de ruptura, sensibilidade e probabilidade
+    margem elasticidade  por que o historico nao mede elasticidade
     margem conferir      as identidades do modelo (RASK = yield x LF etc.)
 """
 from __future__ import annotations
@@ -232,6 +233,19 @@ def _estresse(janela: pd.DataFrame) -> dict:
     }
 
 
+def _elasticidade() -> dict:
+    """A calibracao e os desenhos de teste, para as figuras da ramificacao 4."""
+    from margem import elasticidade
+
+    return {
+        "calibracao": elasticidade.calibracao(),
+        "desenhos": {
+            tolerancia: elasticidade.desenho_do_teste(tolerancia=tolerancia)
+            for tolerancia in (0.10, 0.20, 0.40)
+        },
+    }
+
+
 def _analises(janela: pd.DataFrame) -> dict:
     """As analises que alimentam as figuras alem das tres do modelo base.
 
@@ -246,6 +260,7 @@ def _analises(janela: pd.DataFrame) -> dict:
         "ranking": malha.ranking_de_corte(janela),
         "cascata": malha.simular_corte(bruto, _pior_linha(janela)),
         **_estresse(janela),
+        **_elasticidade(),
     }
 
 
@@ -405,6 +420,58 @@ def cmd_estresse(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_elasticidade(args: argparse.Namespace) -> int:
+    """A demonstracao: elasticidade conhecida, estimador que nao a recupera."""
+    from margem import elasticidade
+
+    verdadeira = elasticidade.ELASTICIDADE_VERDADEIRA
+    print()
+    print(f"O GERADOR USA ELASTICIDADE = {_dec(verdadeira, 1)}, declarada.")
+    print("Quatro especificacoes tentam recuperar esse numero do painel:")
+    print()
+    diagnostico = elasticidade.diagnostico(verdadeira)
+    for registro in diagnostico.itertuples(index=False):
+        marca = "" if registro.sinal_certo else "   <-- SINAL TROCADO"
+        print(f"  {registro.especificacao:<24} {_dec(registro.coeficiente):>7}"
+              f"   IC [{_dec(registro.ic_baixo)}; {_dec(registro.ic_alto)}]{marca}")
+    print()
+
+    print("O TESTE QUE DECIDE — a estimativa se move quando a verdade se move?")
+    calibracao = elasticidade.calibracao()
+    ajustes = calibracao.attrs["ajustes"]
+    for registro in ajustes.itertuples(index=False):
+        veredito = ("identifica" if registro.identifica
+                    else ("NAO responde a verdade" if abs(registro.inclinacao) < 0.15
+                          else "acompanha, deslocada em "
+                               f"{'+' if registro.intercepto > 0 else ''}"
+                               f"{_dec(registro.intercepto)}"))
+        print(f"  {registro.especificacao:<24} inclinacao {_dec(registro.inclinacao):>6}"
+              f"   {veredito}")
+    print()
+    sem_resposta = ajustes[ajustes["inclinacao"].abs() < 0.15]
+    if len(sem_resposta):
+        print("  Inclinacao zero e o caso grave: a estimativa devolve o mesmo")
+        print("  numero com elasticidade -2 ou com elasticidade zero. Ela e")
+        print("  plausivel, estavel, e nao mede nada.")
+    print()
+
+    print(f"O TESTE QUE MEDIRIA (tolerancia +/- {_dec(args.tolerancia, 2)})")
+    desenho = elasticidade.desenho_do_teste(tolerancia=args.tolerancia)
+    print(f"  ruido mensal de demanda suposto: "
+          f"{_pct(desenho.attrs['ruido_demanda'], 0)}")
+    for registro in desenho.itertuples(index=False):
+        print(f"  passo de {_pct(registro.passo_de_preco, 0):>4}   "
+              f"{registro.observacoes:>6} linhas-mes   "
+              f"= {registro.meses_com_20_linhas:>3} meses com as 20 linhas")
+    print()
+    print("  O tamanho escala com o QUADRADO do passo de preco: nao adianta")
+    print("  compensar passo pequeno com paciencia. E o erro e agrupado por")
+    print("  linha, entao por MAIS LINHAS no teste rende mais que esperar")
+    print("  mais meses com as mesmas.")
+    print()
+    return 0
+
+
 def cmd_conferir(args: argparse.Namespace) -> int:
     """As identidades do modelo, medidas no fato e na janela.
 
@@ -465,6 +532,8 @@ def main(argv: list[str] | None = None) -> int:
         ("rateio", cmd_rateio, "o efeito da base de rateio do custo fixo"),
         ("corte", cmd_corte, "o efeito de cortar uma linha da malha"),
         ("estresse", cmd_estresse, "ruptura, sensibilidade e probabilidade"),
+        ("elasticidade", cmd_elasticidade,
+         "por que o historico nao mede elasticidade"),
         ("conferir", cmd_conferir, "as identidades do modelo"),
     ]:
         sub = subcomandos.add_parser(nome, help=ajuda)
@@ -474,6 +543,9 @@ def main(argv: list[str] | None = None) -> int:
         if nome == "estresse":
             sub.add_argument("--cenarios", type=int, default=400,
                              help="sorteios do Monte Carlo (padrao: 400)")
+        if nome == "elasticidade":
+            sub.add_argument("--tolerancia", type=float, default=0.20,
+                             help="precisao alvo do teste de preco (padrao: 0,20)")
 
     args = analisador.parse_args(argv)
     _log(args.verboso)

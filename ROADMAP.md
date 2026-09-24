@@ -74,21 +74,29 @@ premissas.
 supõe demanda que não reage a preço. É exatamente a premissa que o item 4
 ataca.
 
-## 4. Elasticidade e desenho de teste de preço
+## 4. Elasticidade e desenho de teste de preço ✅
 
-**O que se constrói:** gerar demanda com elasticidade **conhecida**, tentar
-recuperá-la de dado observacional com a variação de preço que existe na vida
-real, e mostrar a estimativa falhando. Depois, dimensionar o teste — tamanho de
-amostra por passo de preço e por classe — que identificaria de verdade.
+Painel gerado com elasticidade **conhecida**, quatro especificações tentando
+recuperá-la, e o dimensionamento do teste que a mediria.
 
-**Por que agora:** o tornado do item 3 mostrou que a tarifa é a premissa mais
-poderosa do modelo — e mediu isso supondo demanda que não reage a preço. A
-próxima pergunta é obrigatória.
+**Os achados:**
 
-**O achado esperado:** histórico observacional de tarifa não mede elasticidade,
-porque a variação de preço que existe nele é mix de seção e de classe, não
-decisão de precificação. É o tipo de conclusão que só se demonstra com dado
-sintético, justamente porque ali a resposta verdadeira é conhecida.
+- **Inclinação zero é o defeito perigoso.** O OLS simples devolve −1,04 tanto
+  com elasticidade verdadeira −1,2 quanto com ela em zero. O número é plausível
+  e estável, e não mede nada — só reflete que linha cara é linha de leito.
+- **A correção óbvia piora.** Com efeito fixo de linha a estimativa vira +1,03:
+  "preço alto atrai passageiro". Preço e demanda sobem juntos no pico por
+  motivos independentes.
+- **Nenhuma das quatro identifica.** Duas não respondem à verdade; duas
+  acompanham mas ficam deslocadas em +2,23 e +0,54.
+- **Com os 2% de variação que existem, medir a ±0,20 pediria quatro anos.**
+  Com 10% de passo, três meses.
+
+**Figuras:** `elasticidade-calibracao`, `desenho-do-teste`.
+
+**Ressalvas medidas, não supostas:** o tamanho do teste escala com o quadrado do
+ruído mensal da demanda, e o erro agrupado por linha faz mais LINHAS render mais
+que mais meses.
 
 ## 5. Revenue management: curva de reserva, no-show e overbooking
 
