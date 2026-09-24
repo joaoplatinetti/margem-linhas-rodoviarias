@@ -14,6 +14,8 @@ se o dado viesse de uma extracao cara — aqui ele nao vem.
     margem excel         so a planilha
     margem powerbi       so os CSVs do Power BI
     margem imagens       so as figuras do artigo (PNG + SVG)
+    margem rateio        o efeito da base de rateio do custo fixo
+    margem corte LINHA   o que acontece com a malha ao cortar uma linha
     margem conferir      as identidades do modelo (RASK = yield x LF etc.)
 """
 from __future__ import annotations
@@ -76,6 +78,23 @@ def _montar() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return fato, janela, linhas.catalogo()
 
 
+def _fato_sem_fixo() -> pd.DataFrame:
+    """O fato com custo VARIAVEL e receita, antes de qualquer rateio.
+
+    E o ponto de partida obrigatorio para comparar bases de rateio: reaproveitar
+    o fato ja rateado por km e so trocar a coluna do fixo deixaria o custo total
+    inconsistente com o proprio rateio. A base `receita` ainda exige os
+    indicadores ja calculados, dai o passo por `indicadores.calcular` com o fixo
+    zerado.
+    """
+    from margem import custos, indicadores, sintetico
+
+    fato = custos.aplicar_variaveis(sintetico.gerar())
+    return indicadores.calcular(
+        fato.assign(custo_fixo_rateado=0.0, custo_total=fato["custo_variavel"])
+    )
+
+
 def _resumo_terminal(fato: pd.DataFrame, janela: pd.DataFrame) -> None:
     from margem import indicadores
 
@@ -120,14 +139,21 @@ def _resumo_terminal(fato: pd.DataFrame, janela: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_tudo(args: argparse.Namespace) -> int:
-    from margem import excel, graficos, powerbi
+    from margem import excel, graficos, malha, powerbi
 
     fato, janela, catalogo = _montar()
     _resumo_terminal(fato, janela)
 
     caminho = excel.exportar(fato, janela, catalogo)
     tabelas = powerbi.exportar(fato, janela)
-    figuras = graficos.exportar(janela)
+
+    bruto = _fato_sem_fixo()
+    figuras = graficos.exportar(
+        janela,
+        comparacao=malha.comparar_bases(bruto),
+        ranking=malha.ranking_de_corte(janela),
+        cascata=malha.simular_corte(bruto, _pior_linha(janela)),
+    )
 
     print(f"Excel     {caminho}")
     print(f"Power BI  {config.SAIDA_POWERBI}  "
@@ -191,15 +217,114 @@ def cmd_powerbi(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pior_linha(janela: pd.DataFrame) -> str:
+    """A linha AJUSTAR de maior margem de contribuicao.
+
+    E o caso que a figura do corte existe para mostrar: a que o relatorio aponta
+    como problema e que, cortada, tira mais margem da rede. Se nao houver
+    nenhuma AJUSTAR, cai para a de pior spread.
+    """
+    ajustar = janela[janela["classificacao"] == "AJUSTAR"]
+    if len(ajustar):
+        return ajustar.loc[ajustar["margem_contribuicao"].idxmax(), "linha_id"]
+    return janela.loc[janela["spread_rask_cask"].idxmin(), "linha_id"]
+
+
 def cmd_imagens(args: argparse.Namespace) -> int:
-    from margem import graficos
+    from margem import graficos, malha
 
     _, janela, _ = _montar()
-    figuras = graficos.exportar(janela)
+    bruto = _fato_sem_fixo()
+    figuras = graficos.exportar(
+        janela,
+        comparacao=malha.comparar_bases(bruto),
+        ranking=malha.ranking_de_corte(janela),
+        cascata=malha.simular_corte(bruto, _pior_linha(janela)),
+    )
     print()
     for nome, caminhos in figuras.items():
         print(f"  {nome:<26} {'  '.join(p.rsplit('.', 1)[-1] for p in caminhos)}")
     print(f"\n{config.SAIDA_IMAGENS}\n")
+    return 0
+
+
+def cmd_rateio(args: argparse.Namespace) -> int:
+    """O efeito da base de rateio sobre a decisao e sobre o ranking."""
+    from margem import malha
+
+    bruto = _fato_sem_fixo()
+    resumo = malha.resumo_bases(bruto)
+    comparacao = malha.comparar_bases(bruto)
+
+    print()
+    print("O MESMO BLOCO FIXO, QUATRO BASES DE RATEIO")
+    print(f"  bloco fixo declarado: {_moeda(config.fixo_mensal_total())}/mes, "
+          "identico nas quatro")
+    print()
+    colunas = ["base_rateio", "dirigente", *config.CLASSIFICACOES,
+               "fixo_ask_medio", "cv_fixo_por_ask"]
+    print(resumo[colunas].to_string(index=False, float_format=lambda v: f"{v:9.4f}"))
+    print()
+    for registro in resumo.itertuples(index=False):
+        print(f"  {registro.base_rateio:<11} penaliza {registro.penaliza}")
+    print()
+
+    sensiveis = comparacao[comparacao["sensivel_ao_rateio"]]
+    print(f"ROTULO: muda em {len(sensiveis)} de {len(comparacao)} linhas")
+    for registro in sensiveis.itertuples(index=False):
+        rotulos = {getattr(registro, f"por_{base}") for base in config.BASES_RATEIO}
+        print(f"  {registro.linha:<38} {' / '.join(sorted(rotulos))}")
+    print()
+    print("MAGNITUDE: quanto o fixo por assento-km da MESMA linha varia")
+    topo = comparacao.head(5)
+    for registro in topo.itertuples(index=False):
+        print(f"  {registro.linha:<38} {registro.razao_fixo_ask:.2f}x"
+              f"   anda {int(registro.amplitude_posicao)} posicoes no ranking")
+    print()
+    print("  O rotulo e robusto porque quem decide primeiro e a margem de")
+    print("  contribuicao, que nao depende de rateio. O ranking nao e — e meta,")
+    print("  atencao e orcamento seguem o ranking.")
+    print()
+    return 0
+
+
+def cmd_corte(args: argparse.Namespace) -> int:
+    """O que acontece com a malha inteira ao cortar uma linha."""
+    from margem import malha
+
+    bruto = _fato_sem_fixo()
+    resultado = malha.simular_corte(bruto, args.linha.upper())
+
+    print()
+    print(f"CORTE DE {resultado['linha_id']} — {resultado['linha']}")
+    print(f"  classificada como     {resultado['classificacao_da_cortada']}")
+    print(f"  receita               {_moeda(resultado['receita_da_cortada'])}")
+    print(f"  margem de contribuicao {_moeda(resultado['mc_da_cortada'])}")
+    print()
+    print(f"  resultado da rede antes   {_moeda(resultado['resultado_antes'])}")
+    print(f"  resultado da rede depois  {_moeda(resultado['resultado_depois'])}")
+    print(f"  variacao                  {_moeda(resultado['delta_resultado'])}"
+          f"   (= menos a MC da linha, exatamente)")
+    print()
+    veredito = ("o corte MELHORA a rede" if resultado["delta_resultado"] > 0
+                else "o corte PIORA a rede")
+    print(f"  {veredito}")
+    print()
+    print(f"  CASK da rede: R$ {_dec(resultado['cask_antes'])} -> "
+          f"R$ {_dec(resultado['cask_depois'])} por assento-km")
+    print("  (o bloco fixo nao saiu: ele se redistribuiu entre quem ficou)")
+    print()
+
+    cascata = resultado["cascata"]
+    if len(cascata):
+        print(f"CASCATA: {len(cascata)} linha(s) mudaram de classificacao sem que")
+        print("nada nelas tenha mudado —")
+        for linha_id, registro in cascata.iterrows():
+            print(f"  {registro['linha']:<38} "
+                  f"{registro['classificacao_antes']} -> {registro['classificacao_depois']}")
+    else:
+        print("CASCATA: nenhuma linha mudou de classificacao.")
+    print()
     return 0
 
 
@@ -222,12 +347,21 @@ def cmd_conferir(args: argparse.Namespace) -> int:
     print(indicadores.reconciliar(janela).to_string(index=False))
     print()
 
-    # O rateio do fixo tem que fechar com o total declarado em cada mes.
-    declarado = sum(config.CUSTO_FIXO_MENSAL.values())
-    por_mes = fato.groupby("ano_mes")["custo_fixo_rateado"].sum()
-    erro = (por_mes - declarado).abs().max()
-    print(f"Rateio do fixo: declarado {_moeda(declarado)}/mes, "
-          f"erro maximo do rateio {_moeda(erro)}")
+    # O rateio tem que fechar com o total declarado em cada mes e em CADA BASE.
+    # Conferir so a base em vigor deixaria passar erro nas outras tres, que e
+    # justamente onde a comparacao de `margem rateio` iria buscar o numero.
+    from margem import custos
+
+    declarado = config.fixo_mensal_total()
+    bruto = _fato_sem_fixo()
+    print(f"Rateio do fixo: declarado {_moeda(declarado)}/mes")
+    for base in config.BASES_RATEIO:
+        por_mes = (
+            custos.ratear_fixo(bruto, base=base)
+            .groupby("ano_mes")["custo_fixo_rateado"].sum()
+        )
+        erro = (por_mes - declarado).abs().max()
+        print(f"  por {base:<11} erro maximo {_moeda(erro)}")
     print()
     return 0
 
@@ -251,10 +385,14 @@ def main(argv: list[str] | None = None) -> int:
         ("excel", cmd_excel, "so a planilha formatada"),
         ("powerbi", cmd_powerbi, "so os CSVs do Power BI"),
         ("imagens", cmd_imagens, "so as figuras do artigo (PNG + SVG)"),
+        ("rateio", cmd_rateio, "o efeito da base de rateio do custo fixo"),
+        ("corte", cmd_corte, "o efeito de cortar uma linha da malha"),
         ("conferir", cmd_conferir, "as identidades do modelo"),
     ]:
         sub = subcomandos.add_parser(nome, help=ajuda)
         sub.set_defaults(funcao=funcao)
+        if nome == "corte":
+            sub.add_argument("linha", help="id da linha a cortar, por exemplo L16")
 
     args = analisador.parse_args(argv)
     _log(args.verboso)

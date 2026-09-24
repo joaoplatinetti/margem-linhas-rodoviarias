@@ -101,7 +101,7 @@ FORMATOS: dict[str, str] = {
     "pedagio_km": MOEDA,
     "tripulacao_km": MOEDA,
     "tarifa_km_referencia": UNITARIO,
-    "custo_fixo_km": MOEDA,
+    "custo_fixo_unitario": MOEDA,
     "passageiros": INTEIRO,
     "passageiros_km": INTEIRO,
     "assentos_km": INTEIRO,
@@ -149,7 +149,7 @@ ROTULOS: dict[str, str] = {
     "custo_pedagio": "Pedagio",
     "custo_variavel": "Custo variavel",
     "custo_fixo_rateado": "Fixo rateado",
-    "custo_fixo_km": "Fixo R$/km",
+    "custo_fixo_unitario": "Fixo por unidade da base",
     "custo_total": "Custo total",
     "margem_contribuicao": "Margem contrib.",
     "margem_contribuicao_pct": "MC %",
@@ -516,9 +516,10 @@ def _aba_custos(wb: Workbook, fato: pd.DataFrame, catalogo: pd.DataFrame) -> Non
     celula.number_format = MOEDA_MILHAR
     celula.font = Font(bold=True)
     linha += 1
-    fixo_km = fato.groupby("ano_mes")["custo_fixo_km"].first()
-    ws.cell(row=linha, column=1, value="Rateio medio (R$/km rodado)")
-    ws.cell(row=linha, column=2, value=float(fixo_km.mean())).number_format = MOEDA
+    base = fato["base_rateio"].iloc[0]
+    unitario = fato.groupby("ano_mes")["custo_fixo_unitario"].first()
+    ws.cell(row=linha, column=1, value=f"Rateio medio (R$ por {base})")
+    ws.cell(row=linha, column=2, value=float(unitario.mean())).number_format = MOEDA
     linha += 3
 
     ws.cell(row=linha, column=1, value="Custo variavel unitario por linha").font = FONTE_SUBTITULO

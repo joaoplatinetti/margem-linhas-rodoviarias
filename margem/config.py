@@ -183,10 +183,29 @@ CUSTO_FIXO_MENSAL: dict[str, float] = {
     "depreciacao_e_seguros": 315_000.0,
 }
 
-# Base de rateio do fixo. `km` significa: total do mes dividido pelos km rodados
-# no mes, e cada linha carrega conforme os km que rodou. A soma do rateado fecha
-# com o total declarado por construcao — e um dos testes.
+# Bases de rateio disponiveis, e a coluna do fato que serve de dirigente em cada
+# uma. O rateio e sempre `total_do_mes x (dirigente_da_linha / dirigente_do_mes)`,
+# entao a soma fecha com o total declarado em qualquer uma delas.
+#
+# A escolha da base NAO e detalhe contabil: cada uma penaliza sistematicamente um
+# arquetipo de linha, e isso e demonstravel na algebra, nao so na simulacao.
+# `margem/malha.py` compara as quatro e mede quantas linhas trocam de decisao.
+BASES_RATEIO: dict[str, str] = {
+    "km": "km_rodados",
+    "partida": "partidas",
+    "assento_km": "assentos_km",
+    "receita": "receita",
+}
+
+# A base em vigor. `km` segue a intensidade de uso de frota e oficina, e e a
+# menos ruim para um rateio que vai ser olhado linha a linha — mas continua sendo
+# convencao, e trocar ela muda a lista de linhas a cortar.
 BASE_RATEIO_FIXO = "km"
+
+
+def fixo_mensal_total() -> float:
+    """O bloco fixo declarado, somado. Usado no rateio e nos testes de fecho."""
+    return sum(CUSTO_FIXO_MENSAL.values())
 
 # ---------------------------------------------------------------------------
 # Catalogo de componentes: o que cada um e e onde entra

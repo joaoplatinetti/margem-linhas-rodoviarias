@@ -95,10 +95,24 @@ def test_corredor_agressivo_custa_mais_manutencao(fato):
 
 
 def test_base_de_rateio_desconhecida_falha():
-    original = config.BASE_RATEIO_FIXO
-    config.BASE_RATEIO_FIXO = "partida"
-    try:
-        with pytest.raises(NotImplementedError):
-            custos.ratear_fixo(pd.DataFrame({"km_rodados": [1.0], "ano_mes": ["2026-01"]}))
-    finally:
-        config.BASE_RATEIO_FIXO = original
+    """Base fora do catalogo estoura; ela nao pode virar rateio zero em silencio."""
+    with pytest.raises(ValueError, match="desconhecida"):
+        custos.ratear_fixo(
+            pd.DataFrame({"km_rodados": [1.0], "ano_mes": ["2026-01"],
+                          "custo_variavel": [0.0]}),
+            base="passageiro",
+        )
+
+
+def test_base_sem_a_coluna_dirigente_falha():
+    """Ratear por receita antes de a receita existir tem que falhar alto.
+
+    O caso e real: `aplicar_variaveis` roda antes do calculo de indicadores, e
+    um rateio por receita chamado cedo demais dividiria por uma coluna ausente.
+    """
+    with pytest.raises(ValueError, match="nao esta no fato"):
+        custos.ratear_fixo(
+            pd.DataFrame({"km_rodados": [1.0], "ano_mes": ["2026-01"],
+                          "custo_variavel": [0.0]}),
+            base="receita",
+        )

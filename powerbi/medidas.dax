@@ -304,3 +304,61 @@ Passageiros para o equilíbrio =
     VAR Faltam = [LF de equilíbrio] - [Load factor]
     RETURN
         IF ( Faltam > 0, DIVIDE ( Faltam * [ASK], AVERAGE ( dim_linha[km] ) ) )
+
+
+// ---------------------------------------------------------------------------
+//  8. RATEIO ALTERNATIVO DO CUSTO FIXO
+//     O fato traz o fixo já rateado por km rodado, que é a base em vigor no
+//     modelo. Estas medidas re-rateiam o MESMO bloco fixo por outra base,
+//     dentro do contexto de filtro, sem exigir coluna nova no fato.
+//
+//     Servem para responder em cima do relatório a pergunta que a seção
+//     "O rateio decide mais do que parece" do README levanta: esta linha
+//     continuaria parecendo ruim se a empresa rateasse de outro jeito?
+// ---------------------------------------------------------------------------
+
+// O bloco fixo inteiro do período filtrado, ignorando o filtro de linha.
+// ALLSELECTED preserva o recorte de tempo que o usuário escolheu e solta só a
+// dimensão linha — é o que faz o rateio ser sobre a malha visível, não sobre a
+// base toda.
+Fixo total da malha =
+    CALCULATE ( [Custo fixo rateado], ALLSELECTED ( dim_linha ) )
+
+Receita da malha =
+    CALCULATE ( [Receita], ALLSELECTED ( dim_linha ) )
+
+ASK da malha =
+    CALCULATE ( [ASK], ALLSELECTED ( dim_linha ) )
+
+// Rateio por receita: a linha carrega estrutura na proporção do que fatura.
+Fixo rateado por receita =
+    [Fixo total da malha] * DIVIDE ( [Receita], [Receita da malha] )
+
+// Rateio por assento-km: todo mundo carrega o mesmo por assento oferecido.
+Fixo rateado por ASK =
+    [Fixo total da malha] * DIVIDE ( [ASK], [ASK da malha] )
+
+// O spread sob cada rateio. Comparar os três lado a lado num visual mostra que
+// o rótulo raramente muda e o ranking muda bastante — que é o achado.
+Spread com rateio por receita =
+    DIVIDE ( [Receita] - [Custo variável] - [Fixo rateado por receita], [ASK] )
+
+Spread com rateio por ASK =
+    DIVIDE ( [Receita] - [Custo variável] - [Fixo rateado por ASK], [ASK] )
+
+// Quantas vezes o fixo por assento-km da mesma linha muda entre as bases.
+// Formato: 0,00"x"
+Variação do fixo entre bases =
+    VAR PorKm = DIVIDE ( [Custo fixo rateado], [ASK] )
+    VAR PorReceita = DIVIDE ( [Fixo rateado por receita], [ASK] )
+    VAR PorAsk = DIVIDE ( [Fixo rateado por ASK], [ASK] )
+    VAR Maior = MAX ( MAX ( PorKm, PorReceita ), PorAsk )
+    VAR Menor = MIN ( MIN ( PorKm, PorReceita ), PorAsk )
+    RETURN
+        DIVIDE ( Maior, Menor )
+
+// O efeito de cortar a linha no resultado da malha: menos a margem de
+// contribuição dela. O bloco fixo não sai da empresa junto com a linha, então
+// não entra na conta — e é exatamente por isso que cortar linha com MC positiva
+// piora o resultado. Formato: R$ #.##0;-R$ #.##0
+Efeito de cortar a linha = - [Margem de contribuição]

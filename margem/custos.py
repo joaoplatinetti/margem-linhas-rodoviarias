@@ -79,38 +79,54 @@ def aplicar_variaveis(fato: pd.DataFrame) -> pd.DataFrame:
 # Bloco fixo
 # ---------------------------------------------------------------------------
 
-def ratear_fixo(fato: pd.DataFrame) -> pd.DataFrame:
-    """Rateia o fixo mensal da empresa pelos km rodados de cada linha no mes.
+def ratear_fixo(fato: pd.DataFrame, base: str | None = None) -> pd.DataFrame:
+    """Rateia o bloco fixo mensal entre as linhas, pela base pedida.
 
-    Km rodado e a base menos ruim para um rateio que vai ser olhado por linha:
-    segue a intensidade de uso de frota, oficina e combustivel de apoio, e nao
-    premia nem pune frequencia como o rateio por partida faria. Continua sendo
-    RATEIO, e nenhuma decisao de manter ou cortar deve sair so dele — dai a
-    margem de contribuicao aparecer sempre ao lado.
+    A conta e sempre a mesma:
 
-    Por construcao, a soma do rateado fecha com o total declarado em cada mes
-    (um dos testes fixa isso).
+        fixo_da_linha = total_do_mes x (dirigente_da_linha / dirigente_do_mes)
+
+    entao **a soma do rateado fecha com o total declarado em qualquer base** —
+    um teste fixa isso nas quatro. O que muda de uma base para outra nao e o
+    total, e QUEM carrega quanto.
+
+    Km rodado e o padrao porque segue a intensidade de uso de frota, oficina e
+    combustivel de apoio, e nao premia nem pune frequencia como a base partida
+    faria. Mas continua sendo **convencao**: `margem/malha.py` mede quantas
+    linhas trocam de decisao so por causa dessa escolha, e a resposta nao e zero.
+
+    Nenhuma decisao de manter ou cortar deve sair so do rateio — dai a margem de
+    contribuicao, que nao depende de base nenhuma, aparecer sempre ao lado.
     """
-    if config.BASE_RATEIO_FIXO != "km":
-        raise NotImplementedError(
-            f"base de rateio '{config.BASE_RATEIO_FIXO}' nao implementada — "
-            "hoje o modelo rateia por km rodado"
+    base = base or config.BASE_RATEIO_FIXO
+    if base not in config.BASES_RATEIO:
+        raise ValueError(
+            f"base de rateio '{base}' desconhecida — use uma de "
+            f"{', '.join(config.BASES_RATEIO)}"
+        )
+
+    dirigente = config.BASES_RATEIO[base]
+    if dirigente not in fato.columns:
+        raise ValueError(
+            f"a base '{base}' rateia por '{dirigente}', que nao esta no fato. "
+            "Ratear por receita exige a receita ja calculada."
         )
 
     df = fato.copy()
-    total_mensal = sum(config.CUSTO_FIXO_MENSAL.values())
+    total_mensal = config.fixo_mensal_total()
 
-    km_do_mes = df.groupby("ano_mes")["km_rodados"].transform("sum")
-    df["custo_fixo_km"] = total_mensal / km_do_mes
-    df["custo_fixo_rateado"] = df["km_rodados"] * df["custo_fixo_km"]
+    do_mes = df.groupby("ano_mes")[dirigente].transform("sum")
+    df["base_rateio"] = base
+    df["custo_fixo_unitario"] = total_mensal / do_mes
+    df["custo_fixo_rateado"] = df[dirigente] * df["custo_fixo_unitario"]
 
     df["custo_total"] = df["custo_variavel"] + df["custo_fixo_rateado"]
     return df
 
 
-def aplicar(fato: pd.DataFrame) -> pd.DataFrame:
+def aplicar(fato: pd.DataFrame, base: str | None = None) -> pd.DataFrame:
     """O modelo de custo completo: variaveis e fixo rateado."""
-    return ratear_fixo(aplicar_variaveis(fato))
+    return ratear_fixo(aplicar_variaveis(fato), base=base)
 
 
 # ---------------------------------------------------------------------------

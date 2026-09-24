@@ -14,6 +14,11 @@ CSVs prontos para Power BI, com as medidas DAX escritas.
 uv sync && uv run margem tudo
 ```
 
+> Este repositório é a base de uma série, não uma peça fechada. O que já existe
+> e o que vem a seguir estão no **[ROADMAP](ROADMAP.md)**; a ligação entre cada
+> premissa e a fonte pública que a calibraria está em
+> **[docs/fontes-publicas.md](docs/fontes-publicas.md)**.
+
 ---
 
 ## O que o modelo conclui
@@ -199,6 +204,68 @@ toma assim.
 
 ---
 
+## O rateio decide mais do que parece
+
+O modelo acima rateia o custo fixo por km rodado, e o README original já dizia
+que isso é **convenção, não verdade**. A pergunta natural é: quanto essa
+convenção decide?
+
+Quatro bases são igualmente defensáveis numa reunião — km, partida, assento-km e
+receita — e as quatro fecham com o mesmo bloco fixo de R$ 990 mil/mês. Mas cada
+uma penaliza sistematicamente um arquétipo de linha, e isso é **álgebra, não
+simulação**:
+
+| Base | `fixo / ASK` vira | Quem paga a conta |
+|---|---|---|
+| **km** | `(F/km_total) / assentos` | o **leito**: 26 poltronas contra 46 do convencional → 1,77× mais |
+| **partida** | `(F/partidas) / (km × assentos)` | a **linha curta**: nada dilui o custo por partida |
+| **assento-km** | `F / ASK_total` — constante | ninguém: some da decisão |
+| **receita** | `F × R_i/R` | ninguém: vira um piso único de MC% |
+
+![A mesma linha, quatro rateios](saida/imagens/rateio-por-base.png)
+
+O ponto onde as vinte linhas **convergem** é a base assento-km. Uma base que
+atribui o mesmo fixo por assento-km a todo mundo não distribui estrutura — soma
+uma constante ao CASK. Testes fixam as quatro identidades, inclusive a de que
+ratear por receita reduz a decisão a `MC% ≥ F/R`, exata no grão do mês.
+
+**O achado não é o que eu esperava, e é melhor assim.** O *rótulo* quase não
+muda: só 2 das 20 linhas trocam de classificação, porque quem decide primeiro é
+a margem de contribuição, que não depende de rateio nenhum. O que muda é a
+*magnitude* — o fixo por assento-km da mesma linha varia até **2,35×**, e
+Goiânia–Brasília anda **7 posições** no ranking. Meta, atenção de gestão e
+orçamento seguem o ranking, não o rótulo.
+
+## Cortar a pior linha costuma piorar a rede
+
+Tirar uma linha da malha não tira o custo fixo dela: o bloco continua inteiro e
+se redistribui entre as que ficam. Disso sai uma identidade exata —
+
+```
+Δ resultado da rede = − margem de contribuição da linha cortada
+```
+
+— e ela não depende do spread, do CASK nem da classificação.
+
+![Cortar melhora ou piora a rede?](saida/imagens/ganho-do-corte.png)
+
+Seis linhas aparecem no relatório como problema. **Cortar quatro delas piora o
+resultado**, porque a margem de contribuição que entregavam ao fixo desaparece e
+o fixo continua onde estava. Brasília–BH está classificada como AJUSTAR e
+custaria **R$ 429 mil** — e ainda derrubaria Campo Grande–Cuiabá de MANTER para
+AJUSTAR, sem que nada tenha mudado nessa segunda linha.
+
+É a cascata que quase nunca entra na conta do corte, e é o que transforma
+"cortar a pior" num processo que se repete: cada corte encarece quem fica e
+fabrica a próxima candidata.
+
+```bash
+uv run margem rateio        # o efeito das quatro bases
+uv run margem corte L15     # o que acontece ao cortar uma linha
+```
+
+---
+
 ## As saídas
 
 ### `saida/margem-linhas-rodoviarias.xlsx`
@@ -237,18 +304,21 @@ linhas.
 
 ### `powerbi/medidas.dax`
 
-47 medidas comentadas: as bases aditivas, os indicadores unitários, margem e
+56 medidas comentadas: as bases aditivas, os indicadores unitários, margem e
 resultado, inteligência de tempo (`SAMEPERIODLASTYEAR`, janela móvel com
-`DATESINPERIOD`), a classificação em `SWITCH`, os cartões de decisão e a
-ocupação de equilíbrio. Todas com
+`DATESINPERIOD`), a classificação em `SWITCH`, os cartões de decisão, a ocupação
+de equilíbrio e o **rateio alternativo** — que re-rateia o mesmo bloco fixo por
+outra base dentro do contexto de filtro, respondendo no próprio relatório se a
+linha continuaria parecendo ruim sob outra convenção contábil. Todas com
 `DIVIDE` em vez de `/`, porque `DIVIDE` devolve BLANK no denominador zero
 enquanto `/` devolve Infinito, que contamina qualquer total que o contenha. O
 cabeçalho do arquivo traz a ordem de importação e a lista de relacionamentos.
 
 ### `saida/imagens/` — as figuras
 
-Três figuras em **PNG (200 dpi)** para publicar e **SVG** para reeditar:
-`matriz-decisao`, `load-factor-equilibrio` e `esquema-estrela`.
+Cinco figuras em **PNG (200 dpi)** para publicar e **SVG** para reeditar:
+`matriz-decisao`, `load-factor-equilibrio`, `esquema-estrela`,
+`rateio-por-base` e `ganho-do-corte`.
 
 A paleta das classes é **azul / amarelo / vermelho, não verde / amarelo /
 vermelho**. O semáforo óbvio falha em daltonismo: medido em OKLab, o par
@@ -277,8 +347,10 @@ uv run margem indicadores   # a tabela de decisão
 uv run margem excel         # só a planilha
 uv run margem powerbi       # só os CSVs
 uv run margem imagens       # só as figuras (PNG + SVG)
+uv run margem rateio        # o efeito da base de rateio
+uv run margem corte L15     # o efeito de cortar uma linha
 uv run margem conferir      # as identidades do modelo e o fecho do rateio
-uv run pytest               # 52 testes
+uv run pytest               # 73 testes
 ```
 
 Nenhum subcomando depende de estado deixado pelo anterior e não há pasta de
@@ -302,11 +374,12 @@ margem/
   indicadores.py   ASK, RPK, yield, RASK, CASK, MC, spread, classificação
   excel.py         a pasta de trabalho formatada
   powerbi.py       o esquema estrela
-  graficos.py      as três figuras do artigo
+  malha.py         bases de rateio e simulação de corte
+  graficos.py      as cinco figuras
   pipeline.py      a CLI
 powerbi/medidas.dax
 saida/             versionada de propósito: Excel, CSVs e imagens sem rodar nada
-testes/            52 testes
+testes/            73 testes
 ```
 
 ## Limites declarados
@@ -318,9 +391,13 @@ testes/            52 testes
   consegue defender em reunião.
 - **A linha é medida em um sentido.** O vazio do retorno de feriado não está
   modelado.
-- **O rateio do fixo por km é convenção, não verdade.** Ele segue a intensidade
-  de uso de frota e oficina, mas nenhuma decisão de cortar linha deve sair só
-  dele — por isso a margem de contribuição aparece sempre ao lado.
+- **O rateio do fixo por km é convenção, não verdade** — e agora está medido:
+  a seção sobre rateio mostra quanto a escolha da base muda o ranking. Nenhuma
+  decisão de cortar linha deve sair só dele, e é por isso que a margem de
+  contribuição aparece sempre ao lado.
+- **A perda de tráfego de conexão não está modelada.** A simulação de corte
+  redistribui o custo fixo, mas a malha aqui não é conectada: inventar uma taxa
+  de recaptura produziria um número que parece medido sem ser.
 - **A elasticidade-preço não está modelada.** A tarifa varia com o mix e com a
   pressão competitiva declarada, não com uma curva de resposta da demanda.
   Estimar elasticidade exigiria variação de preço que este dataset não tem — e

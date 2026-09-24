@@ -43,6 +43,7 @@ matplotlib.use("Agg")   # sem display: e geracao de arquivo, nao janela
 import matplotlib.patheffects as efeitos
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
 
 from margem import config
@@ -64,6 +65,7 @@ AZUL = "#2a78d6"
 AMARELO = "#eda100"
 VERMELHO = "#d03b3b"
 AZUL_CLARO = "#cde2fb"
+LARANJA = "#eb6834"   # segunda enfase; par com o azul mede Delta E 24,7 sob protanopia
 
 COR_CLASSE = {"MANTER": AZUL, "AJUSTAR": AMARELO, "REVER": VERMELHO}
 MARCA_CLASSE = {"MANTER": "o", "AJUSTAR": "s", "REVER": "D"}
@@ -90,6 +92,11 @@ def _estilo() -> None:
         "axes.labelsize": 10,
         "legend.frameon": False,
         "svg.fonttype": "none",   # texto editavel no SVG, nao curva
+        # Sem sal de hash, o matplotlib gera os ids de clip com uuid4 e o SVG
+        # sai diferente a cada execucao mesmo com os dados identicos. Como a
+        # saida e versionada, isso faria `margem tudo` sujar o `git status`
+        # todo dia sem um unico numero ter mudado.
+        "svg.hashsalt": "margem-linhas-rodoviarias",
     })
 
 
@@ -110,15 +117,25 @@ def _gravar(fig: plt.Figure, nome: str) -> list[str]:
     caminhos = []
     for extensao, dpi in (("png", 200), ("svg", None)):
         caminho = destino / f"{nome}.{extensao}"
-        fig.savefig(caminho, dpi=dpi, bbox_inches="tight", pad_inches=0.25)
+        # `Date: None` tira o carimbo de data de dentro do SVG, pelo mesmo
+        # motivo do sal de hash acima. O PNG do matplotlib nao carrega data.
+        metadados = {"Date": None} if extensao == "svg" else None
+        fig.savefig(caminho, dpi=dpi, bbox_inches="tight", pad_inches=0.25,
+                    metadata=metadados)
         caminhos.append(str(caminho))
     plt.close(fig)
     log.info("%-26s -> %s.png + .svg", nome, nome)
     return caminhos
 
 
-def _rodape(fig: plt.Figure, texto: str) -> None:
-    fig.text(0.0, -0.02, texto, fontsize=7.5, color=TINTA_FRACA, va="top", ha="left")
+def _rodape(fig: plt.Figure, texto: str, y: float = -0.02) -> None:
+    """Nota de metodo no pe da figura.
+
+    `y` desce quando a figura tem anotacao pendurada abaixo do eixo — senao as
+    duas se sobrepoem, que e o defeito mais chato de achar porque so aparece
+    depois de renderizar.
+    """
+    fig.text(0.0, y, texto, fontsize=7.5, color=TINTA_FRACA, va="top", ha="left")
 
 
 # ---------------------------------------------------------------------------
@@ -488,12 +505,216 @@ def load_factor_equilibrio(janela: pd.DataFrame) -> list[str]:
     return _gravar(fig, "load-factor-equilibrio")
 
 
+
+# ---------------------------------------------------------------------------
+# 4. O efeito da base de rateio
 # ---------------------------------------------------------------------------
 
-def exportar(janela: pd.DataFrame) -> dict[str, list[str]]:
-    """As tres figuras. Devolve nome -> caminhos gravados."""
-    return {
+def rateio_por_base(comparacao: pd.DataFrame) -> list[str]:
+    """Slope chart: o fixo por assento-km da mesma linha sob as quatro bases.
+
+    Forma escolhida por **enfase**, nao por categoria: a historia nao e "vinte
+    linhas diferentes", e "estas duas trocam de lugar". Vinte cores tornariam o
+    grafico ilegivel e enterrariam o achado; duas linhas coloridas contra
+    dezoito cinzas dizem a mesma coisa e deixam ler.
+
+    O que a figura prova de um jeito que a tabela nao prova: no eixo
+    `assento_km` as vinte linhas **convergem para um unico ponto**. Uma base que
+    atribui o mesmo fixo por assento-km a todo mundo nao esta distribuindo
+    estrutura — esta somando uma constante ao CASK, e a decisao que sai dela e um
+    corte unico em margem de contribuicao por assento-km.
+    """
+    _estilo()
+    fig, ax = plt.subplots(figsize=(10.5, 7.4))
+
+    bases = list(config.BASES_RATEIO)
+    colunas = [f"fixo_ask_{base}" for base in bases]
+    posicoes = range(len(bases))
+
+    # Enfase: a linha que a base km mais castiga e a que a base partida mais
+    # castiga — os dois arquetipos que a algebra prevê (o leito e a curta).
+    penalizada_por_km = comparacao.loc[comparacao["fixo_ask_km"].idxmax(), "linha_id"]
+    penalizada_por_partida = comparacao.loc[
+        comparacao["fixo_ask_partida"].idxmax(), "linha_id"]
+    enfase = {penalizada_por_km: LARANJA, penalizada_por_partida: AZUL}
+
+    for registro in comparacao.itertuples(index=False):
+        valores = [getattr(registro, coluna) for coluna in colunas]
+        destaque = enfase.get(registro.linha_id)
+
+        ax.plot(list(posicoes), valores,
+                color=destaque or GRADE, linewidth=2.2 if destaque else 1.2,
+                zorder=4 if destaque else 2, solid_capstyle="round")
+        ax.scatter(list(posicoes), valores, s=46 if destaque else 18,
+                   facecolor=destaque or TINTA_FRACA, edgecolor=SUPERFICIE,
+                   linewidth=1.4 if destaque else 0.8, zorder=5 if destaque else 3)
+
+        if destaque:
+            texto = ax.text(
+                -0.06, valores[0],
+                f"{registro.linha}\n{registro.km} km · {registro.classe.lower()}",
+                fontsize=8.6, color=destaque, fontweight="bold",
+                ha="right", va="center", zorder=6, linespacing=1.5,
+            )
+            texto.set_path_effects([efeitos.withStroke(linewidth=3.0, foreground=SUPERFICIE)])
+            ax.text(len(bases) - 1 + 0.08, valores[-1],
+                    f"{registro.razao_fixo_ask:.2f}x entre a maior e a menor".replace(".", ","),
+                    fontsize=8.4, color=destaque, va="center", zorder=6)
+
+    # A convergencia da base assento_km, que e o achado algebrico da figura.
+    indice_ask = bases.index("assento_km")
+    convergencia = comparacao[f"fixo_ask_assento_km"].iloc[0]
+    # A nota vai ABAIXO do proprio tick da base, e nao ligada ao ponto por uma
+    # linha de chamada: qualquer chamada aqui atravessaria o leque cinza, e a
+    # proximidade com o rotulo do eixo ja faz o trabalho.
+    ax.annotate(
+        "as vinte linhas caem no mesmo ponto: fixo por assento-km\n"
+        "constante nao distribui estrutura nenhuma",
+        xy=(indice_ask, -0.135), xycoords=("data", "axes fraction"),
+        fontsize=8.4, color=TINTA_2, ha="center", va="top",
+        linespacing=1.6, style="italic", annotation_clip=False, zorder=6,
+    )
+
+    rotulos_base = {
+        "km": "por km\nrodado", "partida": "por\npartida",
+        "assento_km": "por\nassento-km", "receita": "por\nreceita",
+    }
+    ax.set_xticks(list(posicoes), [rotulos_base[base] for base in bases], fontsize=10)
+    ax.tick_params(axis="x", length=0)
+    ax.set_xlim(-0.95, len(bases) - 1 + 0.72)
+    ax.set_ylabel("Custo fixo rateado por assento-km (R$)")
+    ax.yaxis.set_major_formatter(lambda v, _: f"{v:.3f}".replace(".", ","))
+    ax.grid(axis="y", color=GRADE, linewidth=0.7)
+    ax.set_axisbelow(True)
+    for lado in ("top", "right", "bottom"):
+        ax.spines[lado].set_visible(False)
+
+    mudam = int(comparacao["sensivel_ao_rateio"].sum())
+    ax.set_title("A mesma linha, quatro rateios defensaveis", fontsize=15,
+                 fontweight="bold", color=TINTA, loc="left", pad=22)
+    # Formatar SO o numero: `.replace(".", ",")` na frase inteira trocava os
+    # pontos finais por virgula.
+    maior_razao = f"{comparacao['razao_fixo_ask'].max():.2f}".replace(".", ",")
+    ax.text(0, 1.015,
+            "O bloco fixo e o mesmo e fecha nas quatro bases. O que muda e quem "
+            f"carrega quanto — ate {maior_razao}x para a mesma linha.",
+            transform=ax.transAxes, fontsize=9.5, color=TINTA_2, va="bottom")
+
+    _rodape(fig, f"Rotulo de decisao muda em apenas {mudam} das "
+                 f"{len(comparacao)} linhas: quem decide primeiro e a margem de "
+                 "contribuicao, que nao depende de rateio nenhum.\n"
+                 "Mas o ranking se reordena em ate "
+                 f"{int(comparacao['amplitude_posicao'].max())} posicoes — e "
+                 "atencao de gestao, meta e orcamento seguem o ranking, nao o rotulo.",
+            y=-0.115)
+    return _gravar(fig, "rateio-por-base")
+
+
+# ---------------------------------------------------------------------------
+# 5. O ganho (ou a perda) de cortar cada linha
+# ---------------------------------------------------------------------------
+
+def ganho_do_corte(ranking: pd.DataFrame, cascata: dict | None = None) -> list[str]:
+    """Barra divergente: quanto a rede ganha ao cortar cada linha, uma por vez.
+
+    Divergente porque o dado e polaridade contra uma referencia — cortar melhora
+    ou piora — e o zero e o unico valor que separa as duas decisoes.
+
+    A cor carrega a CLASSIFICACAO e o comprimento carrega o ganho do corte. Sao
+    variaveis diferentes de proposito: a figura existe justamente para mostrar
+    que elas nao coincidem. Linha amarela (AJUSTAR) com barra fundo negativa e
+    uma linha que o relatorio aponta como problema e que a conta manda manter.
+    """
+    _estilo()
+    ordenado = ranking.sort_values("ganho_do_corte", ascending=True, ignore_index=True)
+    fig, ax = plt.subplots(figsize=(10.5, 8.4))
+
+    posicoes = list(range(len(ordenado)))
+    cores = [COR_CLASSE[registro.classificacao] for registro in ordenado.itertuples(index=False)]
+    ax.barh(posicoes, ordenado["ganho_do_corte"] / 1e6, color=cores, height=0.62, zorder=3)
+    ax.axvline(0, color=EIXO, linewidth=1.0, zorder=4)
+
+    for posicao, registro in zip(posicoes, ordenado.itertuples(index=False)):
+        valor = registro.ganho_do_corte / 1e6
+        alinhamento = "left" if valor >= 0 else "right"
+        recuo = 0.06 if valor >= 0 else -0.06
+        ax.text(valor + recuo, posicao,
+                f"{valor:+.2f}".replace(".", ",") + " mi",
+                fontsize=8.2, color=TINTA_2, va="center", ha=alinhamento, zorder=5)
+
+    ax.set_yticks(posicoes, ordenado["linha"], fontsize=8.6)
+    ax.tick_params(axis="y", length=0)
+    for etiqueta, registro in zip(ax.get_yticklabels(), ordenado.itertuples(index=False)):
+        etiqueta.set_color(TINTA if registro.vale_cortar else TINTA_2)
+
+    ax.set_xlabel("Efeito no resultado da rede ao cortar a linha (R$ milhoes)")
+    # Marcacao em inteiros: com o passo automatico o eixo saia com "-2" duas
+    # vezes, porque -2,5 e -2,0 arredondavam para o mesmo rotulo.
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.xaxis.set_major_formatter(lambda v, _: "0" if abs(v) < 1e-9 else f"{v:+.0f}")
+    ax.grid(axis="x", color=GRADE, linewidth=0.7)
+    ax.set_axisbelow(True)
+    ax.set_ylim(-0.8, len(ordenado) - 0.2)
+    # Folga a esquerda para o rotulo da barra mais longa nao encostar no nome da
+    # linha, que fica no eixo.
+    menor = (ordenado["ganho_do_corte"] / 1e6).min()
+    ax.set_xlim(menor * 1.22, (ordenado["ganho_do_corte"] / 1e6).max() + 0.35)
+    for lado in ("top", "right", "left"):
+        ax.spines[lado].set_visible(False)
+
+    legenda = [
+        Line2D([0], [0], marker="s", color="none", markerfacecolor=COR_CLASSE[nome],
+               markeredgecolor="none", markersize=11, label=f"classificada como {nome}")
+        for nome in config.CLASSIFICACOES
+    ]
+    # Canto SUPERIOR esquerdo: as barras estao ordenadas, entao as de cima sao as
+    # curtas e o resto da faixa fica vazio. Nos dois cantos inferiores e no
+    # inferior direito a legenda cobria as barras mais longas e o rotulo delas.
+    ax.legend(handles=legenda, loc="upper left", fontsize=8.8,
+              labelcolor=TINTA_2, handletextpad=0.5)
+
+    enganosas = ordenado[(~ordenado["vale_cortar"]) & (ordenado["spread_rask_cask"] < 0)]
+    ax.set_title("Cortar a linha melhora ou piora a rede?", fontsize=15,
+                 fontweight="bold", color=TINTA, loc="left", pad=22)
+    ax.text(0, 1.012,
+            "O bloco fixo nao sai da empresa junto com a linha: o resultado da "
+            "rede muda em exatamente menos a margem de contribuicao dela.",
+            transform=ax.transAxes, fontsize=9.5, color=TINTA_2, va="bottom")
+
+    rodape = (
+        f"{len(enganosas)} linhas aparecem no relatorio como problema (spread "
+        "negativo) e mesmo assim o corte delas PIORA o resultado: a margem de "
+        "contribuicao que entregavam ao fixo desaparece\ne o fixo continua onde "
+        "estava, agora rateado entre menos linhas."
+    )
+    if cascata:
+        rodape += (
+            f"\nCortar {cascata['linha']} custaria R$ "
+            f"{abs(cascata['delta_resultado']):,.0f}".replace(",", ".")
+            + f" e ainda derrubaria {len(cascata['cascata'])} outra(s) linha(s) "
+              "de MANTER para AJUSTAR."
+        )
+    _rodape(fig, rodape)
+    return _gravar(fig, "ganho-do-corte")
+
+# ---------------------------------------------------------------------------
+
+def exportar(janela: pd.DataFrame, comparacao: pd.DataFrame | None = None,
+             ranking: pd.DataFrame | None = None,
+             cascata: dict | None = None) -> dict[str, list[str]]:
+    """As figuras. Devolve nome -> caminhos gravados.
+
+    As duas da ramificacao 1 sao opcionais para `margem imagens` continuar
+    servindo quem so quer as tres originais sem pagar as quatro reclassificacoes
+    que a comparacao de bases exige.
+    """
+    figuras = {
         "matriz-decisao": matriz_decisao(janela),
         "esquema-estrela": diagrama_estrela(),
         "load-factor-equilibrio": load_factor_equilibrio(janela),
     }
+    if comparacao is not None:
+        figuras["rateio-por-base"] = rateio_por_base(comparacao)
+    if ranking is not None:
+        figuras["ganho-do-corte"] = ganho_do_corte(ranking, cascata)
+    return figuras
